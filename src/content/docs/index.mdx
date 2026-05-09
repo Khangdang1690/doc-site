@@ -3,53 +3,84 @@ title: sqlitedeploy
 description: Deploy SQLite as a real database. sqld + your own object storage, free-tier friendly.
 template: splash
 hero:
-  tagline: Turso-style SQLite, but you bring your own cloud bucket.
-  actions:
-    - text: Quickstart
-      link: /guides/quickstart/
-      icon: right-arrow
-    - text: GitHub
-      link: https://github.com/Khangdang1690/sqlitedeploy
-      icon: external
-      variant: minimal
+  tagline: ' '
+  actions: []
 ---
 
-import { Card, CardGrid } from '@astrojs/starlight/components';
+<div class="manifest-hero">
+	<div>
+		<p class="ticker">Live · v2 · MIT</p>
+		<p class="manifest-hero__eyebrow">[ Manifest 0001 — sqlitedeploy ]</p>
+		<h1 class="manifest-hero__title">
+			SQLite,<br/>but it <em>ships</em>.
+		</h1>
+		<p class="manifest-hero__lede">
+			A single CLI that starts <code>sqld</code>, replicates the WAL to your own
+			S3-compatible bucket, and opens a public HTTPS endpoint.
+			No SaaS, no vendor lock-in. The bucket is yours. The bytes are yours.
+		</p>
+		<div class="manifest-hero__cta">
+			<a href="/guides/quickstart/" class="primary">→ Quickstart</a>
+			<a href="https://github.com/Khangdang1690/sqlitedeploy">View source</a>
+		</div>
+	</div>
 
-`sqlitedeploy` is an open-source CLI that turns SQLite into a distributed
-database for edge and serverless apps. It bundles
-[`sqld`](https://github.com/tursodatabase/libsql) (the libSQL server,
-MIT-licensed), replicates the WAL to **your own** S3-compatible bucket via
-`bottomless`, and opens a public HTTPS endpoint over Cloudflare Tunnel — no
-domain, no port-forward, no SaaS subscription.
+	<dl class="manifest-hero__meta">
+		<div class="manifest-hero__meta-header">
+			<span>Spec</span>
+			<span>2026/05</span>
+		</div>
+		<dt>Storage</dt>
+		<dd>Cloudflare R2 / B2 / S3</dd>
+		<dt>Wire</dt>
+		<dd>Hrana over HTTP/WS</dd>
+		<dt>Auth</dt>
+		<dd>Ed25519 JWT</dd>
+		<dt>Footprint</dt>
+		<dd>~30 MB binary</dd>
+		<dt>Cost</dt>
+		<dd>$0 — free tier</dd>
+		<dt>License</dt>
+		<dd>MIT</dd>
+	</dl>
+</div>
 
-This very documentation site is powered by sqlitedeploy: the search box
-above queries an FTS5 index inside a sqld instance running on Oracle
-Cloud's Always Free tier.
-
-<CardGrid>
-	<Card title="One command to live" icon="rocket">
-		`sqlitedeploy up` provisions storage, generates JWT keys, starts sqld,
-		and prints a `libsql://` URL your app can connect to.
-	</Card>
-	<Card title="Your bucket, your bytes" icon="cloud-download">
-		WAL replicates to Cloudflare R2, Backblaze B2, or any S3-compatible
-		store. Free tiers cover 10 GB. Zero vendor lock-in.
-	</Card>
-	<Card title="Edge-ready" icon="setting">
-		Cloudflare Workers, AWS Lambda, Vercel — anything that speaks HTTP can
-		query sqld through `@libsql/client`.
-	</Card>
-	<Card title="Live read replicas" icon="approve-check">
-		`sqlitedeploy attach` streams WAL frames over gRPC for sub-second
-		freshness. Geo-distribute reads with one command.
-	</Card>
-</CardGrid>
+<div class="feature-grid">
+	<div>
+		### One command to live
+		<p>
+			<code>sqlitedeploy up</code> provisions storage, generates JWT keys,
+			starts sqld, and prints a <code>libsql://</code> URL.
+		</p>
+	</div>
+	<div>
+		### Your bucket, your bytes
+		<p>
+			WAL replicates to Cloudflare R2, Backblaze B2, or any
+			S3-compatible store. Free tiers cover 10 GB.
+		</p>
+	</div>
+	<div>
+		### Edge-ready
+		<p>
+			Cloudflare Workers, AWS Lambda, Vercel, FastAPI — anything
+			that speaks HTTP can talk to sqld via <code>@libsql/client</code>.
+		</p>
+	</div>
+	<div>
+		### Live read replicas
+		<p>
+			<code>sqlitedeploy attach</code> streams WAL frames over gRPC.
+			Sub-second freshness; one command per region.
+		</p>
+	</div>
+</div>
 
 ## When NOT to use this
 
-- **You need multi-writer.** SQLite is single-writer at the file level. Use
-  rqlite, LiteFS Cloud, or Turso's managed product.
-- **You need automatic failover.** Recovery is a manual `--sync-from-storage`
-  on a fresh primary.
-- **You're on Windows.** sqld's WAL implementation is POSIX-only. Use WSL2.
+- **Multi-writer workloads.** SQLite is single-writer at the file
+  level. Use rqlite, LiteFS Cloud, or Turso's managed product.
+- **Hard-failover guarantees.** Recovery is a manual
+  `--sync-from-storage` on a fresh primary.
+- **Native Windows hosts.** sqld's WAL implementation is POSIX-only.
+  Use WSL2 or a Linux container.

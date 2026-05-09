@@ -1,0 +1,56 @@
+---
+// Brutalist site mark: a small typeset block instead of plain text.
+// Renders in the top-left of every page. Replaces Starlight's default
+// `SiteTitle` component (wired via astro.config.mjs `components` field).
+---
+
+<a href="/" class="mark" aria-label="sqlitedeploy">
+	<span class="mark__bracket" aria-hidden="true">[</span>
+	<span class="mark__name">sqlitedeploy</span>
+	<span class="mark__bracket" aria-hidden="true">]</span>
+	<span class="mark__cursor" aria-hidden="true"></span>
+</a>
+
+<style>
+	.mark {
+		display: inline-flex;
+		align-items: baseline;
+		gap: 0.15rem;
+		font-family: 'JetBrains Mono', ui-monospace, monospace;
+		font-weight: 800;
+		font-size: 0.95rem;
+		letter-spacing: -0.02em;
+		color: var(--brand-ink);
+		text-decoration: none;
+		padding: 0.35rem 0.5rem;
+		border: 1.5px solid var(--brand-ink);
+		background: var(--brand-bg);
+		transition: background 80ms, color 80ms;
+	}
+	.mark:hover {
+		background: var(--brand-ink);
+		color: var(--brand-bg);
+	}
+	.mark__bracket {
+		color: var(--brand-accent);
+		font-weight: 600;
+	}
+	.mark:hover .mark__bracket {
+		color: var(--brand-accent-2);
+	}
+	.mark__cursor {
+		display: inline-block;
+		width: 0.55em;
+		height: 0.95em;
+		background: var(--brand-accent);
+		margin-left: 0.2rem;
+		transform: translateY(0.1em);
+		animation: blink 1.1s steps(2, end) infinite;
+	}
+	@keyframes blink {
+		50% { opacity: 0; }
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.mark__cursor { animation: none; }
+	}
+</style>

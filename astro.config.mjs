@@ -14,6 +14,24 @@ export default defineConfig({
 		starlight({
 			title: 'sqlitedeploy',
 			description: 'Deploy SQLite as a real database — sqld + your own object storage, free tier friendly.',
+			customCss: ['./src/styles/global.css'],
+			head: [
+				{
+					tag: 'link',
+					attrs: { rel: 'preconnect', href: 'https://fonts.googleapis.com' },
+				},
+				{
+					tag: 'link',
+					attrs: { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' },
+				},
+				{
+					tag: 'link',
+					attrs: {
+						rel: 'stylesheet',
+						href: 'https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&display=swap',
+					},
+				},
+			],
 			social: [
 				{ icon: 'github', label: 'GitHub', href: 'https://github.com/Khangdang1690/sqlitedeploy' },
 			],
@@ -21,6 +39,7 @@ export default defineConfig({
 				// Replace Starlight's built-in Pagefind search with one backed by
 				// a sqld FTS5 index (populated at build time by scripts/index-search.ts).
 				Search: './src/components/SearchBox.astro',
+				SiteTitle: './src/components/SiteTitle.astro',
 			},
 			sidebar: [
 				{
