@@ -40,13 +40,29 @@ edge cert covers TLS at the Worker.
 | `env.example` | `/opt/docs/env` (renamed) | Paste the real `replica.jwt` value here, then `chmod 600`. |
 | `deploy.sh` | `/opt/docs/deploy.sh` | `chmod +x` it. Run as the `docs` user. |
 
+## Before you start
+
+If you've never used Oracle Cloud, follow
+**[oracle-setup.md](./oracle-setup.md)** first. It's a click-by-click
+walkthrough of: signup, VM creation, reserving a public IP, opening
+the VCN security list, and the iptables gotcha. ~45 minutes including
+account-verification waiting.
+
+When you finish that guide you'll have:
+
+- An Ubuntu Ampere A1 VM with a permanent public IPv4 address
+- Port 80 reachable from the public internet (curl returns "Connection
+  refused" — meaning the firewall is open but no service is running yet)
+- SSH access via `ssh -i ~/.ssh/oracle_a1 ubuntu@<VM_IP>`
+
 ## First-time host setup
 
+SSH into the VM, then run these commands in order:
+
 ```bash
-# 1. Open Oracle's VCN ingress (TCP 80 from 0.0.0.0/0) in the
-#    Cloud console, AND open Ubuntu's iptables on the VM:
-sudo iptables -I INPUT 6 -p tcp --dport 80 -j ACCEPT
-sudo netfilter-persistent save
+# 1. (Already done in oracle-setup.md, sections 6 & 8) Confirm:
+#    - Oracle VCN allows TCP 80 inbound from 0.0.0.0/0
+#    - Ubuntu iptables has an ACCEPT rule for tcp/80
 
 # 2. Install runtime deps.
 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
