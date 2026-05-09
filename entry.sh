@@ -21,6 +21,17 @@ set -euo pipefail
 mkdir -p /data
 cd /data
 
+# Workaround: sqld v0.24.32 demands LIBSQL_BOTTOMLESS_AWS_DEFAULT_REGION
+# (AWS SDK naming convention), but sqlitedeploy's BottomlessEnv only sets
+# LIBSQL_BOTTOMLESS_AWS_REGION. Without this, sqld errors out with
+# "Internal Error: `LIBSQL_BOTTOMLESS_AWS_DEFAULT_REGION was not set`"
+# during namespace creation. R2's region is always "auto".
+# We set these in os.Environ() so they propagate through sqlitedeploy's
+# Cmd.Env merge (BottomlessEnv overrides take precedence, but neither of
+# these names is in BottomlessEnv).
+export LIBSQL_BOTTOMLESS_AWS_DEFAULT_REGION=auto
+export AWS_DEFAULT_REGION=auto
+
 # Spawn sqld (via sqlitedeploy) in the background.
 # --byo-storage skips the managed-R2 OAuth flow (we have raw creds).
 # --no-tunnel keeps sqld on loopback (Fly's edge fronts our public port).
