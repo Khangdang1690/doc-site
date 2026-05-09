@@ -1,13 +1,27 @@
-# Multi-stage image: build sqlitedeploy CLI from source, build the Astro
-# site, then assemble a slim runtime that runs both daemons under entry.sh.
+# Multi-stage Docker image for Fly.io.
 #
-# Why we build sqlitedeploy from source instead of `npm install -g`:
-# the npm-published sqlitedeploy@latest is still v1 (Litestream-era) and
-# only exposes `run`. v2 (sqld + bottomless, with `up`/`down`/`attach`)
-# has not been published to npm yet, but our entry.sh requires `up`.
-# Building straight from the GitHub source guarantees v2.
+# Three things have to come together at runtime inside the container:
+#   1. A real `sqld` binary on PATH      ← sourced from Turso's official image
+#   2. Our `sqlitedeploy` v2 CLI         ← built from source (npm @latest is v1)
+#   3. The built Astro site + indexer    ← built from this repo
+#
+# Why these come from three different places:
+#  - The committed binaries at internal/sqld/bin/sqld-linux-amd64 in the
+#    sqlitedeploy repo are 144-byte PLACEHOLDERS replaced by `make build-sqld`
+#    locally or by CI. They're not real binaries.
+#  - sqlitedeploy@latest on npm is still v1 (Litestream-era) which uses `run`,
+#    but our entry.sh expects v2's `up`/`down`/`attach`.
+#  - Astro is what we're actually shipping.
+#
+# sqlitedeploy's binary resolution (internal/sqld/embed.go:Resolve) tries
+# the embedded binary first, then falls back to `exec.LookPath("sqld")`,
+# which is why putting sqld on PATH is enough.
 
-# ─── Stage 1: build sqlitedeploy ────────────────────────────────────────
+# ─── Stage 1: pull the real sqld binary from Turso's official image ─────
+FROM ghcr.io/tursodatabase/libsql-server:v0.24.32 AS sqld-image
+# (no commands; Stage 4 does the COPY --from=sqld-image)
+
+# ─── Stage 2: build sqlitedeploy v2 CLI from source ─────────────────────
 FROM golang:1.25-bookworm AS sqlitedeploy-builder
 ARG SQLITEDEPLOY_REF=main
 RUN apt-get update && \
@@ -16,23 +30,20 @@ RUN apt-get update && \
 RUN git clone --depth 1 --branch "${SQLITEDEPLOY_REF}" \
         https://github.com/Khangdang1690/sqlitedeploy.git /src
 WORKDIR /src
-# Binary embeds linux-amd64 sqld via go:embed at compile time.
 RUN go build -trimpath -ldflags='-s -w' -o /out/sqlitedeploy ./cmd/sqlitedeploy
 
-
-# ─── Stage 2: build the Astro site ──────────────────────────────────────
+# ─── Stage 3: build the Astro site ──────────────────────────────────────
 FROM node:22-slim AS builder
 WORKDIR /app
 RUN corepack enable && corepack prepare pnpm@10 --activate
 COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY . .
-# postbuild indexer no-ops here because LIBSQL_URL is unset; we run it at
-# runtime once sqld is up (see entry.sh).
+# postbuild indexer no-ops here (LIBSQL_URL unset). Real reindex runs at
+# container start (see entry.sh).
 RUN pnpm build
 
-
-# ─── Stage 3: runtime ───────────────────────────────────────────────────
+# ─── Stage 4: runtime ───────────────────────────────────────────────────
 FROM node:22-slim AS runtime
 WORKDIR /app
 
@@ -42,11 +53,13 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends curl ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
-COPY --from=sqlitedeploy-builder /out/sqlitedeploy /usr/local/bin/sqlitedeploy
-COPY --from=builder /app/dist            ./dist
-COPY --from=builder /app/node_modules    ./node_modules
-COPY --from=builder /app/package.json    ./package.json
-COPY --from=builder /app/scripts         ./scripts
+COPY --from=sqld-image            /bin/sqld           /usr/local/bin/sqld
+COPY --from=sqlitedeploy-builder  /out/sqlitedeploy   /usr/local/bin/sqlitedeploy
+
+COPY --from=builder /app/dist             ./dist
+COPY --from=builder /app/node_modules     ./node_modules
+COPY --from=builder /app/package.json     ./package.json
+COPY --from=builder /app/scripts          ./scripts
 COPY --from=builder /app/src/content/docs ./src/content/docs
 COPY entry.sh ./entry.sh
 RUN chmod +x ./entry.sh
