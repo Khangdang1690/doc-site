@@ -11,7 +11,7 @@ dist
 .env.production
 .env.example
 .dockerignore
-Dockerfile
 fly.toml
-entry.sh
 deploy/
+# Note: entry.sh and Dockerfile must NOT be excluded — entry.sh is COPY'd
+# into the runtime stage; Dockerfile is referenced by the build itself.

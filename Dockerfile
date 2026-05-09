@@ -27,10 +27,12 @@ WORKDIR /app
 
 # curl: used by entry.sh to wait for sqld's /health.
 # ca-certificates: TLS to Cloudflare R2.
+# Pin sqlitedeploy so silent upstream changes can't break our build.
+ARG SQLITEDEPLOY_VERSION=latest
 RUN apt-get update && \
     apt-get install -y --no-install-recommends curl ca-certificates && \
     rm -rf /var/lib/apt/lists/* && \
-    npm install -g --omit=dev sqlitedeploy
+    npm install -g --omit=dev "sqlitedeploy@${SQLITEDEPLOY_VERSION}"
 
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
