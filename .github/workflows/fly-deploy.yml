@@ -1,0 +1,43 @@
+# Auto-deploy to Fly.io on every push to main.
+#
+# This is "CI/CD" — the same `fly deploy` command we run locally, but
+# triggered by GitHub on each merge. We deliberately do NOT use Fly's
+# web-UI "Auto-deploy from GitHub" feature, because that flow ignores
+# our fly.toml and tries to inject internal_port = 8080.
+#
+# Setup (one-time):
+#   1. Create a deploy token:
+#        fly tokens create deploy -x 999999h -a sqlitedeploy-docs
+#   2. Add it as a GitHub secret named FLY_API_TOKEN. Either via the
+#      GitHub web UI (Settings → Secrets and variables → Actions) or:
+#        gh secret set FLY_API_TOKEN --app actions
+#      then paste when prompted.
+#   3. Push to main; this workflow takes over from there.
+
+name: Deploy to Fly.io
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: fly-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Deploy app
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Deploy
+        run: flyctl deploy --remote-only --config fly.toml --app sqlitedeploy-docs
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

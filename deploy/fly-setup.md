@@ -168,16 +168,43 @@ to your bucket.
 
 ---
 
-## 6. Subsequent deploys
+## 6. Subsequent deploys (GitHub Actions CI/CD)
 
-Make changes locally, commit, then:
+Once the first deploy works manually, set up auto-deploy on every push
+to `main`. The workflow file
+[`.github/workflows/fly-deploy.yml`](../.github/workflows/fly-deploy.yml)
+is already in this repo; you just need to give it a Fly token.
+
+```powershell
+# 1. Generate a long-lived deploy token (only `deploy` scope, only this app).
+fly tokens create deploy -x 999999h -a sqlitedeploy-docs
+
+# Output looks like:  FlyV1 fm2_lJP...long string...
+# Copy the entire string including "FlyV1 ".
+
+# 2. Save it as a GitHub Actions secret. Don't paste it into chat.
+gh secret set FLY_API_TOKEN --app actions
+# When prompted, paste the token. (Or use the GitHub web UI:
+# Settings → Secrets and variables → Actions → New repository secret.)
+```
+
+That's the whole CI/CD setup. From now on:
+
+```bash
+git push origin main      # triggers the workflow, which runs `fly deploy`
+```
+
+You can still deploy manually whenever you want — the manual command
+keeps working in parallel with CI:
 
 ```powershell
 fly deploy --app sqlitedeploy-docs
 ```
 
-Fly rebuilds the image, ships a new Machine, drains the old one. Zero
-downtime by default. The volume (your DB) carries across.
+Both paths use the same `fly.toml` and `Dockerfile`, so they're
+equivalent. **Do not** use Fly's web-UI "Auto-deploy from GitHub"
+feature — it overrides `fly.toml` settings (notably `internal_port`,
+which it forces to 8080) and breaks the deploy.
 
 ---
 
