@@ -2,20 +2,25 @@
 #
 # Three things have to come together at runtime inside the container:
 #   1. A real `sqld` binary on PATH      ← sourced from Turso's official image
-#   2. Our `sqlitedeploy` v2 CLI         ← built from source (npm @latest is v1)
+#   2. Our `sqlitedeploy` v2 CLI         ← built from source on `main`
 #   3. The built Astro site + indexer    ← built from this repo
 #
-# Why these come from three different places:
-#  - The committed binaries at internal/sqld/bin/sqld-linux-amd64 in the
-#    sqlitedeploy repo are 144-byte PLACEHOLDERS replaced by `make build-sqld`
-#    locally or by CI. They're not real binaries.
-#  - sqlitedeploy@latest on npm is still v1 (Litestream-era) which uses `run`,
-#    but our entry.sh expects v2's `up`/`down`/`attach`.
-#  - Astro is what we're actually shipping.
+# As of sqlitedeploy v0.5.1, the upstream binary on npm exposes the v2
+# commands (`up`/`down`/`attach`) and `Resolve()` will download a real
+# sqld from GitHub Releases on first run if the embedded binary is a
+# placeholder — so neither stage 1 nor stage 2 is *strictly required*
+# anymore. We keep both for two reasons:
+#
+#  - Stage 1 (sqld from ghcr.io): bakes the binary into the image so
+#    container cold starts don't pay the ~30 MB GitHub Releases fetch.
+#  - Stage 2 (build sqlitedeploy from source): lets this repo deploy off
+#    `main` between published releases. We'll switch to
+#    `npm install -g sqlitedeploy@<version>` once v0.5.1's pipeline has
+#    shipped one full cycle successfully.
 #
 # sqlitedeploy's binary resolution (internal/sqld/embed.go:Resolve) tries
-# the embedded binary first, then falls back to `exec.LookPath("sqld")`,
-# which is why putting sqld on PATH is enough.
+# the embedded binary, then `exec.LookPath("sqld")`, then GitHub Releases.
+# Putting sqld on PATH (stage 1) hits the second branch.
 
 # ─── Stage 1: pull the real sqld binary from Turso's official image ─────
 FROM ghcr.io/tursodatabase/libsql-server:v0.24.32 AS sqld-image

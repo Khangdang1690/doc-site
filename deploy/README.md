@@ -53,60 +53,42 @@ If you outgrow Fly or want to move:
 - Update `Dockerfile`/`fly.toml` for the new host (or replace them with
   whatever the new platform expects).
 
-## Upstream sqlitedeploy fixes worth contributing back
+## Upstream sqlitedeploy fixes that landed in v0.5.1
 
 While bringing this site up we found three real bugs in the
-sqlitedeploy repo. We worked around each one in this docs-site so the
-deploy works today, but the fixes belong upstream so other users don't
-hit the same wall.
+sqlitedeploy repo. All three landed upstream in v0.5.1 (issues
+[#4](https://github.com/Khangdang1690/sqlitedeploy/issues/4),
+[#5](https://github.com/Khangdang1690/sqlitedeploy/issues/5),
+[#6](https://github.com/Khangdang1690/sqlitedeploy/issues/6)):
 
-### 1. npm `sqlitedeploy@latest` still ships v1
+1. **npm `sqlitedeploy@latest` now ships v2** — the v0.5.1 tag pushed
+   the existing release pipeline through `npm publish`, so
+   `npm install -g sqlitedeploy` finally exposes the v2 commands
+   (`up`, `down`, `attach`, `dev`, `auth`, `status`).
+2. **`go install` works without `make build-sqld`** — `Resolve()` now
+   adds a third fallback after the PATH lookup: download the
+   matching real `sqld` from this repo's GitHub Release on first run
+   (cached under the user cache dir). The npm/pip/Maven packages
+   still ship `sqld` embedded — the fallback only kicks in for
+   `go install` and source builds.
+3. **`LIBSQL_BOTTOMLESS_AWS_DEFAULT_REGION` is set correctly** — the
+   `envRegion` constant in `internal/sqld/env.go` was renamed to
+   match what sqld v0.24.32 actually reads. R2 deployments no longer
+   need to export the env var manually.
 
-`packaging/npm/sqlitedeploy/package.json` is at v0.5.1 in the repo,
-but the version published to npm is the v1 binary that exposes `run`
-instead of `up`. Either run `npm publish` from the v2 source, or
-delete the npm `latest` tag until v2 is ready to publish.
+### What this repo no longer needs
 
-**Workaround in this repo**: Dockerfile builds sqlitedeploy from
-github.com/Khangdang1690/sqlitedeploy at branch `main` instead of
-installing from npm.
+- The two `export LIBSQL_BOTTOMLESS_AWS_DEFAULT_REGION=auto` lines in
+  `entry.sh` (removed) — sqlitedeploy v0.5.1 sets the right name itself.
 
-### 2. `internal/sqld/bin/sqld-linux-*` are placeholders, not real binaries
+### What this repo still does (by choice, not by workaround)
 
-The repo commits 144-byte text files like
-`PLACEHOLDER sqld-linux-amd64 — replaced by make build-sqld...` to
-those paths. A `go build` of sqlitedeploy embeds these placeholders,
-so the resulting binary errors out at runtime with `no sqld binary
-available for linux/amd64` whenever the user hasn't run `make
-build-sqld` first.
-
-**Suggested upstream fix**: either ship pre-built binaries via Git LFS
-or GitHub Releases, or add a build hook so `go install
-github.com/Khangdang1690/sqlitedeploy/cmd/sqlitedeploy@latest` works.
-
-**Workaround in this repo**: Dockerfile pulls the real sqld binary
-from `ghcr.io/tursodatabase/libsql-server:v0.24.32` and puts it on
-PATH, where sqlitedeploy's `Resolve()` falls back to it.
-
-### 3. `LIBSQL_BOTTOMLESS_AWS_REGION` env var name mismatch
-
-[`internal/sqld/env.go`](https://github.com/Khangdang1690/sqlitedeploy/blob/main/internal/sqld/env.go)
-sets `LIBSQL_BOTTOMLESS_AWS_REGION`, but sqld v0.24.32 (which the
-Makefile pins via `LIBSQL_VERSION ?= libsql-server-v0.24.32`) demands
-`LIBSQL_BOTTOMLESS_AWS_DEFAULT_REGION` (the AWS SDK convention). sqld
-fails namespace creation with `Internal Error:
-LIBSQL_BOTTOMLESS_AWS_DEFAULT_REGION was not set`.
-
-**Suggested upstream fix**: change the constant to
-`LIBSQL_BOTTOMLESS_AWS_DEFAULT_REGION`, or set both names in the env
-map for compatibility across sqld versions.
-
-**Workaround in this repo**: `entry.sh` exports both env vars
-explicitly before invoking sqlitedeploy, so they propagate to sqld via
-`os.Environ()`.
-
-### Once these are fixed upstream, you can simplify this repo by:
-
-- Replacing the Dockerfile's Go builder stage with `npm install -g sqlitedeploy@<version>`
-- Removing the `ghcr.io/tursodatabase/libsql-server` stage entirely (real binaries will be embedded)
-- Deleting the two `export LIBSQL_BOTTOMLESS_AWS_DEFAULT_REGION=auto` lines from entry.sh
+- **Dockerfile pulls sqld from `ghcr.io/tursodatabase/libsql-server:v0.24.32`** —
+  faster cold starts than letting v2's runtime fallback download from
+  GitHub Releases on the first container boot. The fallback exists, we
+  just prefer baking the binary in for container images.
+- **Dockerfile builds `sqlitedeploy` from GitHub source instead of
+  `npm install -g sqlitedeploy@<version>`** — lets the docs-site
+  deploy track changes on `main` between published releases. We'll
+  switch to pinning a tagged npm version once v0.5.1's release
+  pipeline has shipped one full cycle successfully.

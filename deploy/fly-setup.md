@@ -240,9 +240,9 @@ random 502s under any concurrent load, `fly machine status` showing
 
 | Symptom in `fly logs` | Cause | Fix |
 |---|---|---|
-| `error: unknown command "up" for "sqlitedeploy"` | npm `sqlitedeploy@latest` is still v1 (Litestream-era, uses `run`). v2 (`up`/`down`) hasn't been published. | Already handled — Dockerfile clones from GitHub source instead of `npm install -g`. |
-| `error: no sqld binary available for linux/amd64` | The committed `internal/sqld/bin/sqld-linux-amd64` is a 144-byte text placeholder; `make build-sqld` replaces it locally. | Already handled — Dockerfile pulls real sqld from `ghcr.io/tursodatabase/libsql-server:v0.24.32`. |
-| `Internal Error: LIBSQL_BOTTOMLESS_AWS_DEFAULT_REGION was not set` | sqlitedeploy's `BottomlessEnv()` sets `LIBSQL_BOTTOMLESS_AWS_REGION`; sqld v0.24.32 demands the AWS-SDK-style `…_DEFAULT_REGION`. Name mismatch. | Already handled — `entry.sh` exports both names before invoking sqlitedeploy. |
+| `error: unknown command "up" for "sqlitedeploy"` | npm `sqlitedeploy@latest` was v1 (uses `run`); v2 published in v0.5.1 ([#4](https://github.com/Khangdang1690/sqlitedeploy/issues/4)). | Fixed in sqlitedeploy v0.5.1; this repo's Dockerfile still clones from source so deploys can track `main` between releases. |
+| `error: no sqld binary available for linux/amd64` | Committed `internal/sqld/bin/sqld-*` are placeholders; pre-v0.5.1 builds had no fallback ([#5](https://github.com/Khangdang1690/sqlitedeploy/issues/5)). | Fixed in sqlitedeploy v0.5.1 (`Resolve()` now downloads from GitHub Releases on first run); this repo's Dockerfile still pulls sqld from `ghcr.io/tursodatabase/libsql-server:v0.24.32` to keep cold starts fast. |
+| `Internal Error: LIBSQL_BOTTOMLESS_AWS_DEFAULT_REGION was not set` | Pre-v0.5.1, `BottomlessEnv()` set the wrong env var name ([#6](https://github.com/Khangdang1690/sqlitedeploy/issues/6)). | Fixed in sqlitedeploy v0.5.1 — the `envRegion` constant now matches what sqld v0.24.32 reads. |
 | `error: app name is taken` on `fly apps create` | Pick a different name; update `app =` in `fly.toml`. |
 | Build fails with "no space left on device" | Layer cache full | `fly deploy --build-only`, then `fly deploy --image <ref>`. |
 | Cold-start times out healthcheck | sqld first-time bootstrap can take >30s | Increase `grace_period` in `fly.toml` to `60s`. |
