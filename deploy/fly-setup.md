@@ -50,7 +50,7 @@ You need: a bucket, an Account ID, and an R2 API token (Access Key + Secret).
 You now have four pieces of information:
 
 ```
-CF_ACCOUNT_ID = 1a2b3c4d5e6f7g8h9i0j1k2l3m4n5o6p
+CF_ACCOUNT_ID = ...
 CF_R2_BUCKET = sqlitedeploy-docs-db
 R2_ACCESS_KEY = <your access key id>
 R2_SECRET_KEY = <your secret access key>
@@ -121,7 +121,7 @@ Paste in the four R2 values from step 1:
 
 ```powershell
 fly secrets set --app sqlitedeploy-docs `
-  CF_ACCOUNT_ID="1a2b3c4d..." `
+  CF_ACCOUNT_ID="..." `
   CF_R2_BUCKET="sqlitedeploy-docs-db" `
   R2_ACCESS_KEY="<your access key id>" `
   R2_SECRET_KEY="<your secret access key>"
