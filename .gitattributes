@@ -1,0 +1,7 @@
+# Force LF line endings on files that run inside the Linux container.
+# Without this, Windows checkouts commit CRLF and the container fails
+# with "bad interpreter: /bin/bash^M: no such file or directory".
+entry.sh        text eol=lf
+*.sh            text eol=lf
+Dockerfile      text eol=lf
+fly.toml        text eol=lf

@@ -5,10 +5,9 @@ powered by `sqlitedeploy` itself.
 
 The site is built with **Astro Starlight** and runs in hybrid mode (static
 pages + a single SSR API route) on the Node adapter. Search is backed by
-**SQLite FTS5** inside a sqld instance; the index is rebuilt at every
-build by `scripts/index-search.ts`. WAL replicates to **Cloudflare R2**
-via bottomless. Everything lives on **Oracle Cloud Always Free**
-(Ampere A1 ARM, 4 OCPU / 24 GB).
+**SQLite FTS5** inside a sqld instance; the index is rebuilt on every
+boot by `scripts/index-search.ts`. WAL replicates to **Cloudflare R2**
+via bottomless. Everything runs as a single **Fly.io** Machine.
 
 ## Stack
 
@@ -16,13 +15,12 @@ via bottomless. Everything lives on **Oracle Cloud Always Free**
 |---|---|
 | Framework | Astro 6 + Starlight 0.39 |
 | Runtime | Node 20 (Astro `@astrojs/node` standalone) |
-| DB | sqld (via `sqlitedeploy up --no-tunnel`) |
+| DB | sqld (via `sqlitedeploy up --byo-storage --no-tunnel`) |
 | Search | SQLite FTS5 (`docs_fts` virtual table) |
 | Object storage | Cloudflare R2 (10 GB free, $0 egress) |
-| Public ingress | Cloudflare Worker on free `*.workers.dev` (no domain needed) |
-| Origin proxy | Caddy on the VM (plain HTTP + shared-secret check) |
-| Host | Oracle Cloud Always Free Ampere A1 |
-| **Total cost** | **$0/year** — no domain registration |
+| Host | Fly.io shared-cpu-1x, 256 MB RAM |
+| Public URL | `https://<app>.fly.dev` (free TLS, free hostname) |
+| **Total cost** | **~$2/mo** (~$24/yr) |
 
 ## Local dev
 
@@ -47,25 +45,24 @@ pnpm dev
 
 ## Production deploy
 
-See [`deploy/README.md`](./deploy/README.md) for the full walkthrough.
-tl;dr:
+See [`deploy/fly-setup.md`](./deploy/fly-setup.md) for the full
+click-by-click walkthrough. tl;dr:
 
-1. Create a Cloudflare account (free; no domain required).
-2. Provision an Oracle Cloud Ampere A1 VM (Ubuntu 22.04 ARM64). Open
-   port 80 in the VCN security list **and** in iptables.
-3. SSH in. Install Node, pnpm, Caddy, and `npm i -g sqlitedeploy`.
-4. As the `sqld` user: `sqlitedeploy auth login` then
-   `sqlitedeploy up --no-tunnel`. Capture the replica JWT.
-5. Generate a shared secret (`openssl rand -hex 32`). Paste it into the
-   Caddyfile on the VM **and** into the Worker via `wrangler secret put`.
-6. Run `deploy/deploy.sh` to build + reindex + start the docs server.
-7. From your workstation: `cd worker && pnpm deploy` to publish the
-   public Worker. Wrangler prints your `*.workers.dev` URL.
+1. Cloudflare R2: create a bucket, generate an API token, capture
+   `CF_ACCOUNT_ID` + bucket name + access/secret keys.
+2. Install `flyctl` (one-line PowerShell installer).
+3. `fly apps create sqlitedeploy-docs` and
+   `fly volumes create data --region iad --size 1`.
+4. `fly secrets set CF_ACCOUNT_ID=… CF_R2_BUCKET=… R2_ACCESS_KEY=… R2_SECRET_KEY=…`.
+5. `fly deploy`. Wait ~5 minutes. Hit the printed URL.
 
 ## Project layout
 
 ```
 docs-site/
+├── Dockerfile                    # Multi-stage Docker build for Fly
+├── entry.sh                      # Container entrypoint: starts sqld, reindexes, execs Astro
+├── fly.toml                      # Fly app config (256 MB, 1 GB volume, scale-to-zero)
 ├── astro.config.mjs              # Starlight config + Node adapter
 ├── src/
 │   ├── content/docs/
@@ -78,18 +75,10 @@ docs-site/
 │       └── api/
 │           └── search.ts         # SSR endpoint, runs FTS5 query
 ├── scripts/
-│   └── index-search.ts           # Build-time indexer; postbuild script
-├── deploy/                       # Files to ship to the Oracle VM
-│   ├── Caddyfile
-│   ├── env.example
-│   ├── deploy.sh
-│   └── systemd/
-│       ├── sqlitedeploy.service
-│       └── docs-site.service
-├── worker/                       # Cloudflare Worker proxy (public ingress)
-│   ├── src/index.ts
-│   ├── wrangler.toml
-│   └── README.md
+│   └── index-search.ts           # FTS5 indexer; runs at container boot
+├── deploy/
+│   ├── README.md                 # Architecture + summary
+│   └── fly-setup.md              # Click-by-click deploy walkthrough
 └── package.json
 ```
 
@@ -97,17 +86,17 @@ docs-site/
 
 ```
   ┌─────────────────────────────────────┐
-  │  Build time (on the VM)             │
+  │  Container boot (Fly Machine starts)│
   │  ─────────                          │
-  │  pnpm build                         │
-  │   └─ astro build  → dist/           │
-  │   └─ postbuild    → tsx scripts/index-search.ts
-  │                       │             │
-  │                       ▼             │
-  │  sqld :8080 ─── INSERT INTO docs_fts (slug,title,description,body)
-  │   │                                 │
-  │   ▼ bottomless (async)              │
-  │  Cloudflare R2 bucket               │
+  │  entry.sh                           │
+  │   ├─ sqlitedeploy up --byo-storage  │
+  │   │    └─ sqld :8080 (loopback)     │
+  │   ├─ wait for sqld /health          │
+  │   ├─ tsx scripts/index-search.ts    │
+  │   │    └─ INSERT INTO docs_fts …    │
+  │   │           ↓ bottomless (async)  │
+  │   │       Cloudflare R2 bucket      │
+  │   └─ exec node ./dist/server/entry.mjs (Astro foreground)
   └─────────────────────────────────────┘
 
   ┌─────────────────────────────────────┐
@@ -115,7 +104,7 @@ docs-site/
   │  ────────────                       │
   │  GET /api/search?q=replicas         │
   │   └─ Astro Node SSR (/api/search.ts)│
-  │       └─ libsql client → sqld :8080 │
+  │       └─ libsql client → 127.0.0.1:8080
   │           └─ SELECT … FROM docs_fts │
   │              WHERE docs_fts MATCH ? │
   │                                     │
@@ -123,11 +112,11 @@ docs-site/
   └─────────────────────────────────────┘
 ```
 
-The build inserts; sqld (running on the same VM) serves reads. A user's
-browser hits `https://sqlitedeploy-docs.<account>.workers.dev/api/search`;
-the Worker proxies it as plain HTTP to the VM's port 80 (with a
-shared-secret header); Caddy validates the secret and forwards to Astro
-on `127.0.0.1:4321`, which queries sqld on `127.0.0.1:8080`.
+A user hits `https://<app>.fly.dev/api/search?q=…`; Fly's edge proxy
+terminates TLS and forwards over Fly's internal network to the Machine
+on port 4321; Astro's API route opens a libsql client to `127.0.0.1:8080`
+on the same Machine; sqld serves the FTS5 query out of the SQLite file
+on the mounted volume.
 
 ## License
 

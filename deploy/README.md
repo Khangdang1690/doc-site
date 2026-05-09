@@ -1,160 +1,54 @@
-# Deploy artifacts
+# Deploy
 
-This directory contains the files you copy onto the Oracle Cloud VM.
-None of these run locally — they're for the production host.
+The docs site runs as a single Fly.io Machine with a 1 GB persistent
+volume. WAL replicates to a Cloudflare R2 bucket via bottomless.
+Public HTTPS comes free on `*.fly.dev`.
 
-The public ingress is a [Cloudflare Worker](../worker/) on a free
-`*.workers.dev` hostname; the VM itself stays on plain HTTP behind a
-shared-secret check.
+**Cost: ~$2/mo** (shared-cpu-1x @ 256 MB always-on; cheaper with scale-to-zero).
 
-## Architecture (free-tier topology)
+## Setup walkthrough
+
+Follow **[fly-setup.md](./fly-setup.md)**. It's a click-by-click guide
+covering Cloudflare R2, flyctl install, app + volume + secrets, and
+the first deploy. ~25 minutes end-to-end.
+
+## What's in this repo for deploys
+
+| File | Purpose |
+|---|---|
+| [`../Dockerfile`](../Dockerfile) | Multi-stage build: pnpm build → Debian-slim runtime with sqlitedeploy CLI |
+| [`../entry.sh`](../entry.sh) | Container entry point: starts sqlitedeploy, reindexes FTS5, execs Astro |
+| [`../fly.toml`](../fly.toml) | Fly app config: 256 MB shared-cpu-1x, scale-to-zero, 1 GB volume mount |
+| [`../.dockerignore`](../.dockerignore) | Excludes node_modules, dist, deploy/, etc. from the build context |
+
+## Architecture
 
 ```
   User
-    ↓ HTTPS (free, Cloudflare edge cert)
-  Cloudflare Worker  →  sqlitedeploy-docs.<your-account>.workers.dev
-    │
-    │  HTTP (over public internet) + X-Worker-Secret header
-    ↓
-  Oracle VM port 80
-    ↓
-  Caddy (plain HTTP, validates X-Worker-Secret, gzip, logs)
-    ↓
-  Astro Node SSR :4321
-    ↓
-  sqld :8080 (loopback only)
-    ↓
-  bottomless WAL → Cloudflare R2 bucket (10 GB free)
+    ↓ HTTPS (*.fly.dev, free TLS at edge)
+  Fly proxy
+    ↓ HTTP (Fly internal network)
+  Fly Machine (256 MB shared-cpu-1x)
+    ├─ Astro Node SSR :4321 (foreground PID 1)
+    └─ sqlitedeploy + sqld :8080 (loopback only)
+            ↓
+        bottomless WAL replication
+            ↓
+        Cloudflare R2 bucket
 ```
 
-No domain, no Origin Certificate, no Let's Encrypt — Cloudflare's free
-edge cert covers TLS at the Worker.
+The Astro process queries sqld over `127.0.0.1:8080` — same host, no
+network hop. No reverse proxy on the Machine itself; Fly's edge handles
+TLS, HTTP/2, and DDoS protection.
 
-## What goes where
+## Switching to a different host later
 
-| File in this repo | Path on the VM | Notes |
-|---|---|---|
-| `Caddyfile` | `/etc/caddy/Caddyfile` | Replace `WORKER_SECRET_HERE` with the value you stored in `wrangler secret put`. |
-| `systemd/sqlitedeploy.service` | `/etc/systemd/system/sqlitedeploy.service` | Runs `sqlitedeploy up --no-tunnel` as the `sqld` user. |
-| `systemd/docs-site.service` | `/etc/systemd/system/docs-site.service` | Runs the Astro Node SSR server as the `docs` user. |
-| `env.example` | `/opt/docs/env` (renamed) | Paste the real `replica.jwt` value here, then `chmod 600`. |
-| `deploy.sh` | `/opt/docs/deploy.sh` | `chmod +x` it. Run as the `docs` user. |
+If you outgrow Fly or want to move:
 
-## Before you start
-
-If you've never used Oracle Cloud, follow
-**[oracle-setup.md](./oracle-setup.md)** first. It's a click-by-click
-walkthrough of: signup, VM creation, reserving a public IP, opening
-the VCN security list, and the iptables gotcha. ~45 minutes including
-account-verification waiting.
-
-When you finish that guide you'll have:
-
-- An Ubuntu Ampere A1 VM with a permanent public IPv4 address
-- Port 80 reachable from the public internet (curl returns "Connection
-  refused" — meaning the firewall is open but no service is running yet)
-- SSH access via `ssh -i ~/.ssh/oracle_a1 ubuntu@<VM_IP>`
-
-## First-time host setup
-
-SSH into the VM, then run these commands in order:
-
-```bash
-# 1. (Already done in oracle-setup.md, sections 6 & 8) Confirm:
-#    - Oracle VCN allows TCP 80 inbound from 0.0.0.0/0
-#    - Ubuntu iptables has an ACCEPT rule for tcp/80
-
-# 2. Install runtime deps.
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt install -y nodejs caddy
-sudo npm i -g sqlitedeploy pnpm
-
-# 3. Create service users.
-sudo useradd -m -s /bin/bash sqld
-sudo useradd -m -s /bin/bash docs
-sudo mkdir -p /opt/docs && sudo chown docs:docs /opt/docs
-
-# 4. Bootstrap sqld interactively, then stop it.
-sudo -iu sqld
-mkdir -p ~/db && cd ~/db
-sqlitedeploy auth login    # browser flow
-sqlitedeploy up --no-tunnel  # Ctrl-C after you see the success banner
-exit
-
-# 5. Capture the replica JWT for systemd.
-sudo cat /home/sqld/db/.sqlitedeploy/auth/replica.jwt   # copy the token
-sudo cp deploy/env.example /opt/docs/env
-sudo nano /opt/docs/env                                 # paste the token
-sudo chown docs:docs /opt/docs/env && sudo chmod 600 /opt/docs/env
-
-# 6. Install systemd units + Caddy config.
-sudo cp deploy/systemd/*.service /etc/systemd/system/
-sudo cp deploy/Caddyfile /etc/caddy/Caddyfile
-sudo nano /etc/caddy/Caddyfile      # replace WORKER_SECRET_HERE
-
-# 7. Clone the docs repo and run the first deploy.
-sudo -iu docs
-git clone https://github.com/Khangdang1690/doc-site /opt/docs/source
-cp /opt/docs/source/deploy/deploy.sh /opt/docs/deploy.sh
-chmod +x /opt/docs/deploy.sh
-exit
-
-# 8. Light it up.
-sudo systemctl daemon-reload
-sudo systemctl enable --now sqlitedeploy
-sudo -u docs /opt/docs/deploy.sh
-sudo systemctl reload caddy
-```
-
-## Then deploy the Worker
-
-```bash
-# On your workstation:
-cd worker
-pnpm install
-pnpm exec wrangler login
-openssl rand -hex 32 | tee /tmp/worker-secret      # save this value
-pnpm exec wrangler secret put WORKER_SECRET        # paste it
-nano wrangler.toml                                  # set ORIGIN to http://<VM_IP>
-pnpm deploy
-```
-
-Wrangler prints the public URL — that's your docs site.
-
-**Then** SSH back to the VM and update `/etc/caddy/Caddyfile` so its
-`WORKER_SECRET_HERE` placeholder matches the value you set above:
-
-```bash
-sudo sed -i "s/WORKER_SECRET_HERE/$(cat /tmp/worker-secret)/" /etc/caddy/Caddyfile
-sudo systemctl reload caddy
-shred -u /tmp/worker-secret
-```
-
-## Subsequent deploys
-
-```bash
-# Docs site changes:
-sudo -u docs /opt/docs/deploy.sh
-
-# Worker changes:
-cd worker && pnpm deploy
-```
-
-## Verifying
-
-```bash
-# 1. Origin reachable from the Worker (run on the VM):
-curl -I -H "X-Worker-Secret: $(grep -oP 'X-Worker-Secret \K\S+' /etc/caddy/Caddyfile | head -1)" http://127.0.0.1/
-
-# 2. Origin rejects requests without the secret (run from anywhere):
-curl -I http://<VM_IP>/      # → 401 Forbidden
-
-# 3. Public site (replace with your workers.dev hostname):
-curl -I https://sqlitedeploy-docs.<your-account>.workers.dev/
-
-# 4. Search API hits FTS5:
-curl 'https://sqlitedeploy-docs.<your-account>.workers.dev/api/search?q=bottomless'
-
-# 5. WAL replicated to R2: check Cloudflare R2 dashboard → bucket has
-#    `db/` prefix objects with timestamps after your last deploy.
-```
+- The persistent state lives in **two places**: the Fly Volume (mounted
+  at `/data`) and the R2 bucket. Either alone is enough to rebuild.
+- To move: spin up sqlitedeploy on the new host, point it at the same
+  R2 bucket with `--byo-storage --provider r2 --bucket <name>` and the
+  same R2 credentials, and `sqlitedeploy up --sync-from-storage`. Done.
+- Update `Dockerfile`/`fly.toml` for the new host (or replace them with
+  whatever the new platform expects).

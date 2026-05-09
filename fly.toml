@@ -1,0 +1,56 @@
+# Fly app config. Run `fly launch --no-deploy` once to create the app and
+# pick a unique app name, then deploy with `fly deploy`.
+#
+# Cost estimate (us-east region, 2026-05):
+#   shared-cpu-1x @ 256MB always-on: ~$2.02/mo  ← cheapest, what we use
+#   shared-cpu-1x @ 256MB scale-to-zero (low traffic): < $0.50/mo
+#   1 GB volume: $0/mo (under 3 GB free per org)
+#   Outbound: < 100 GB free, then $0.02/GB
+#
+# 256MB is tight: sqld + Node Astro SSR baseline is ~150-220MB. We cap
+# Node's heap (NODE_OPTIONS below) to leave room for sqld + bottomless.
+# If you see OOM kills in `fly logs`, bump `memory` to "512mb" — adds ~$1.30/mo.
+
+app = "sqlitedeploy-docs"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  HOST = "0.0.0.0"
+  PORT = "4321"
+  # Cap V8 heap so Node + sqld + OS fit comfortably in 256MB.
+  NODE_OPTIONS = "--max-old-space-size=128"
+
+# Public HTTPS on https://<app>.fly.dev — no domain needed, no cert config.
+[http_service]
+  internal_port = 4321
+  force_https = true
+  # Scale to zero when idle. Cold start adds ~3-5s on the next request.
+  # Set min_machines_running = 1 if you want zero cold start (and pay full price).
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ["app"]
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "30s"
+    method = "GET"
+    path = "/"
+
+# Persistent volume for sqld's local SQLite + JWT keys + .sqlitedeploy state.
+# WAL frames also stream to R2, so the volume is "important but not the
+# only copy" — bottomless can rebuild from the bucket if it's lost.
+[[mounts]]
+  source = "data"
+  destination = "/data"
+  initial_size = "1gb"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
+  cpus = 1
