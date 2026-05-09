@@ -1,0 +1,260 @@
+---
+title: Pricing vs managed Postgres
+description: Monthly cost comparison — sqlitedeploy on a small VM + object storage vs RDS, Aurora, Supabase, Neon, and Cloud SQL.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+This page compares what you'd actually pay each month to run sqlitedeploy
+on rented compute + a bucket vs running the same workload on managed
+PostgreSQL. Tone is honest engineering: we'll show where sqlitedeploy
+saves real money, where it doesn't apply, and where managed Postgres is
+worth its price.
+
+<Aside type="note">
+	**Prices fetched 2026-05-09.** Cloud pricing drifts; every figure
+	below links to its source so you can re-verify before quoting these
+	numbers in a decision document. US-East / us-central1 / EU regions
+	used where applicable; reserved/committed-use discounts ignored
+	(on-demand only).
+</Aside>
+
+## TL;DR — small production app
+
+Baseline: **10 GB of data, ~5M queries/month, ~100 GB egress/month, single
+region, business-hours bursty traffic.** Roughly the shape of an early-stage
+SaaS or a moderately-active internal tool.
+
+| Option                                         | Compute  | Storage   | Egress   | **Monthly total** |
+| ---------------------------------------------- | -------- | --------- | -------- | ----------------: |
+| sqlitedeploy on Hetzner CX22 + Cloudflare R2   | €3.79    | $0.15     | $0       | **~€4 (~$5)**     |
+| sqlitedeploy on Fly shared-cpu-1x 1 GB + R2    | $5.92    | $0.15     | $0       | **~$6**           |
+| sqlitedeploy on AWS t4g.small (EC2) + S3       | ~$12.26  | $0.23     | $9.00    | **~$22**          |
+| Supabase Pro                                   | included | included  | included | **$25** (10 GB+egress in plan) |
+| RDS Postgres db.t4g.small, single-AZ           | $23.36   | ~$1.15    | ~$9.00   | **~$34**          |
+| Neon Launch (24/7 active, 1 CU)                | ~$77     | $3.50     | varies   | **~$80**          |
+| RDS Postgres db.t4g.small, Multi-AZ            | $46.72   | ~$2.30    | ~$9.00   | **~$58**          |
+| Aurora Postgres Serverless v2 (avg 0.5 ACU)    | ~$43.80  | ~$1.00    | ~$9.00   | **~$54**          |
+| Cloud SQL PostgreSQL db-custom-1-3840          | ~$50.55  | ~$1.70    | ~$12.00  | **~$64**          |
+
+The savings aren't a quirk of the math — they come from the architecture.
+sqlitedeploy is a single process and a bucket. Managed Postgres is a
+managed service with a built-in compute floor.
+
+## What "serverless" actually means for cost
+
+<Aside type="caution">
+	**"Serverless" ≠ "free when idle."** Each service draws the line
+	differently, and three of the most-quoted serverless Postgres products
+	have very different idle bills.
+</Aside>
+
+- **Aurora Serverless v2** scales between a *minimum* and *maximum* ACU.
+  Setting the minimum to **0 ACU** lets it pause when there are no active
+  connections, but
+  [resume takes ~15 seconds](https://repost.aws/questions/QUbtHMLZXiS4Kppi7KMIB5YQ/aurora-serverless-v2-minimum-cost-setup-for-development-environment) —
+  acceptable for dev, not for user-facing production. Setting the minimum
+  to 0.5 ACU keeps it warm and bills $0.12 × 0.5 × 730 = **~$43.80/month
+  even at zero traffic**, before storage.
+- **Neon** scales to zero genuinely — suspended computes bill $0/hour
+  ([source](https://neon.com/pricing)). Cold-start is faster than Aurora
+  but still measurable. The flip side is that an *active* Neon Launch
+  database at 1 CU is $0.106/CU-hr × 730 = ~$77/month before storage,
+  more than RDS Multi-AZ.
+- **sqlitedeploy** is *not* scale-to-zero. The primary VM runs 24/7 and
+  bills the same whether traffic exists or not. The trade is that the
+  always-on bill is **~$5/month**, not $40+/month — so for any workload
+  that gets meaningful traffic during business hours, sqlitedeploy is
+  cheaper than scale-to-zero serverless even before considering
+  cold-start UX.
+
+The honest framing: **sqlitedeploy is "always-on cheap," not
+"scale-to-zero."** If your workload genuinely sees zero traffic for most
+of the day and you can tolerate cold-starts, Neon's free tier or scale-to-zero
+billing wins. If it sees any sustained traffic, the $5 VM beats every
+managed-Postgres compute floor.
+
+## Cost breakdowns
+
+### sqlitedeploy + bucket
+
+| Component                                | Price                       | Source |
+| ---------------------------------------- | --------------------------- | ------ |
+| Hetzner CX22 (2 vCPU, 4 GB, 40 GB SSD)   | €3.79/mo                    | [Hetzner Cloud](https://www.hetzner.com/cloud) |
+| Hetzner CX32 (4 vCPU, 8 GB, 80 GB SSD)   | €6.80/mo                    | [Hetzner Cloud](https://www.hetzner.com/cloud) |
+| Fly shared-cpu-1x, 1 GB RAM              | $5.92/mo                    | [Fly.io pricing](https://fly.io/docs/about/pricing/) |
+| Fly volume (per GB-mo of disk)           | $0.15/GB-mo                 | [Fly.io pricing](https://fly.io/docs/about/pricing/) |
+| Cloudflare R2 storage                    | $0.015/GB-mo (10 GB free)   | [R2 pricing](https://developers.cloudflare.com/r2/pricing/) |
+| Cloudflare R2 egress to internet         | **$0**                      | [R2 pricing](https://developers.cloudflare.com/r2/pricing/) |
+| Cloudflare R2 Class A ops (writes)       | $4.50/M (1M free)           | [R2 pricing](https://developers.cloudflare.com/r2/pricing/) |
+| Cloudflare R2 Class B ops (reads)        | $0.36/M (10M free)          | [R2 pricing](https://developers.cloudflare.com/r2/pricing/) |
+| Backblaze B2 storage                     | $6.95/TB-mo (10 GB free)    | [B2 pricing](https://www.backblaze.com/cloud-storage/pricing) |
+| Backblaze B2 egress                      | $0.01/GB after 3× free tier | [B2 pricing](https://www.backblaze.com/cloud-storage/pricing) |
+| Cloudflare Tunnel (quick tunnel)         | $0                          | (TryCloudflare) |
+
+### AWS RDS PostgreSQL
+
+| Component                         | Price                       | Source |
+| --------------------------------- | --------------------------- | ------ |
+| db.t4g.micro single-AZ            | ~$0.016/hr ≈ $11.68/mo      | [Aiven RDS instance browser](https://aiven.io/tools/instances/db.t4g.micro) |
+| db.t4g.small single-AZ            | ~$0.032/hr ≈ $23.36/mo      | [Vantage RDS browser](https://instances.vantage.sh/aws/rds/db.t4g.small) |
+| Multi-AZ                          | 2× the single-AZ compute    | [AWS RDS pricing](https://aws.amazon.com/rds/postgresql/pricing/) |
+| Storage (gp3)                     | ~$0.115/GB-mo               | [AWS RDS pricing](https://aws.amazon.com/rds/postgresql/pricing/) |
+| Backup storage (over allocated)   | ~$0.095/GB-mo               | [AWS RDS pricing](https://aws.amazon.com/rds/postgresql/pricing/) |
+| Data transfer out (to internet)   | $0.09/GB after 100 GB free  | [AWS data transfer pricing](https://aws.amazon.com/ec2/pricing/on-demand/) |
+
+### AWS Aurora Postgres Serverless v2
+
+| Component                                 | Price                  | Source |
+| ----------------------------------------- | ---------------------- | ------ |
+| Aurora Standard ACU-hour                  | $0.12/ACU-hr           | [Aurora pricing](https://aws.amazon.com/rds/aurora/pricing/) |
+| Aurora I/O-Optimized ACU-hour             | $0.156/ACU-hr          | [Aurora pricing](https://aws.amazon.com/rds/aurora/pricing/) |
+| Storage                                   | ~$0.10/GB-mo           | [Aurora pricing](https://aws.amazon.com/rds/aurora/pricing/) |
+| I/O requests (Standard config)            | ~$0.20/M               | [Aurora pricing](https://aws.amazon.com/rds/aurora/pricing/) |
+| Min capacity 0 ACU (auto-pause)           | bills $0 when paused; ~15 s resume | [AWS re:Post](https://repost.aws/questions/QUbtHMLZXiS4Kppi7KMIB5YQ/aurora-serverless-v2-minimum-cost-setup-for-development-environment) |
+
+A 0.5-ACU floor is **0.5 × $0.12 × 730 = ~$43.80/month** for compute
+even at zero traffic.
+
+### Supabase
+
+| Tier        | Cost            | Includes                                          | Source |
+| ----------- | --------------- | ------------------------------------------------- | ------ |
+| Free        | $0              | 500 MB DB, 5 GB egress, shared compute            | [Supabase pricing](https://supabase.com/pricing) |
+| Pro         | from $25/mo     | 8 GB DB, 250 GB egress, $10 compute credits       | [Supabase pricing](https://supabase.com/pricing) |
+| Team        | from $599/mo    | same per-project limits, SOC2, RBAC, etc.         | [Supabase pricing](https://supabase.com/pricing) |
+| Enterprise  | custom          | BYO Cloud, custom limits                          | [Supabase pricing](https://supabase.com/pricing) |
+
+Pro plan overage rates: **$0.125/GB-mo** disk over 8 GB,
+**$0.09/GB egress** over 250 GB.
+
+### Neon
+
+| Tier    | Cost                           | Includes                                  | Source |
+| ------- | ------------------------------ | ----------------------------------------- | ------ |
+| Free    | $0                             | 0.5 GB storage, 100 CU-hours, scale-to-zero | [Neon pricing](https://neon.com/pricing) |
+| Launch  | pay-as-you-go                  | $0.106/CU-hr, $0.35/GB-mo storage         | [Neon pricing](https://neon.com/pricing) |
+| Scale   | pay-as-you-go                  | $0.222/CU-hr, $0.35/GB-mo storage         | [Neon pricing](https://neon.com/pricing) |
+
+Suspended compute bills $0/hour — Neon is the rare service where
+genuinely-idle workloads cost nothing.
+
+### Google Cloud SQL PostgreSQL
+
+| Component (us-central1)                  | Price                | Source |
+| ---------------------------------------- | -------------------- | ------ |
+| Per vCPU                                 | ~$30.11/mo           | [Cloud SQL pricing](https://cloud.google.com/sql/pricing) |
+| Per GB RAM                               | ~$5.11/mo            | [Cloud SQL pricing](https://cloud.google.com/sql/pricing) |
+| 1 vCPU + 4 GB RAM (db-custom-1-3840)     | ~$50.55/mo compute   | (1 × $30.11 + 4 × $5.11) |
+| SSD storage                              | ~$0.17/GB-mo         | [Cloud SQL pricing](https://cloud.google.com/sql/pricing) |
+| Egress to internet                       | varies $0.08–0.23/GB | [Cloud SQL pricing](https://cloud.google.com/sql/pricing) |
+
+## Where the savings come from
+
+1. **No managed-Postgres compute floor.** A €3.79 Hetzner CX22 is cheaper
+   than the cheapest RDS instance — and it has 4 GB of RAM, twice what
+   t4g.small ships with.
+2. **Free egress on R2.** S3 charges $0.09/GB after the first 100 GB;
+   100 GB/month of egress on S3 is ~$9 you don't pay on R2. For backup
+   restore over the wire (which can be tens of GB), this matters.
+3. **One writer = no replication billing surprises.** No Multi-AZ doubling,
+   no read-replica compute hours. Replicas in sqlitedeploy run on
+   *additional* commodity VMs you control — same price ceiling, not the
+   2× managed-service uplift.
+4. **Free Cloudflare quick tunnels for staging and hobby.** Production
+   typically wants a real domain, but for everything earlier, the tunnel
+   is free and the URL is real.
+5. **No connection-pooler add-on.** The Hrana protocol is HTTP — Lambdas,
+   Workers, and Vercel functions can hammer it without exhausting
+   anything. Postgres needs PgBouncer or RDS Proxy ($) to do the same.
+
+## Where managed Postgres wins on cost
+
+- **Genuinely idle workloads on Neon Free or Scale-to-zero.** sqlitedeploy
+  on a $5 VM still costs $5 when nobody is using it. Neon costs $0.
+  For demo apps, internal tools that hibernate over weekends, or per-tenant
+  preview databases, scale-to-zero is the right tool.
+- **Workloads where ops time exceeds the savings.** RDS auto-failover is
+  paid-for engineering. If your team would spend 3 engineer-hours/month
+  on a sqlitedeploy primary that RDS would handle automatically, RDS is
+  cheaper at any reasonable hourly rate.
+- **Workloads that need >1 writer or strict cross-region durability.**
+  sqlitedeploy *can't do this* — comparison doesn't apply. Postgres,
+  Aurora Global Database, or Spanner are the right tools.
+- **Heavy use of Postgres-only features.** RLS, mature JSONB indexing,
+  PostGIS, pg_vector at scale, listen/notify, advisory locks, materialized
+  views — these are real and they're on Postgres. SQLite has rougher
+  equivalents at best.
+
+## Three sample workloads
+
+### Hobby / side-project
+
+1 GB data, ~10K queries/day, occasional traffic.
+
+| Option                          | Monthly | Notes |
+| ------------------------------- | ------: | ----- |
+| sqlitedeploy on Hetzner CX22 + R2 free tier | **~€4** | well within R2's 10 GB free |
+| Supabase Free                   | **$0**  | 500 MB DB ceiling — fine for 1 GB? not quite |
+| Neon Free                       | **$0**  | 0.5 GB ceiling — same constraint |
+| RDS db.t4g.micro single-AZ      | ~$15    | $11.68 compute + ~$1 storage + small egress |
+| Aurora SLv2 with 0.5 ACU floor  | ~$45    | floor dominates the bill |
+
+If your data fits in the free tiers, free tiers win. As soon as it
+doesn't, sqlitedeploy is cheapest.
+
+### Small SaaS
+
+10 GB data, ~5M queries/month, ~50K MAU, real-user expectations.
+
+| Option                                | Monthly | Notes |
+| ------------------------------------- | ------: | ----- |
+| sqlitedeploy on Hetzner CX22 + R2     | **~€5** | scales without changing the bill until ~50 GB |
+| sqlitedeploy on Fly shared-cpu-1x 1 GB + R2 | **~$8** | nicer ops UX than raw VM |
+| Supabase Pro                          | **$25** | DX-first, no VM, generous egress |
+| RDS Multi-AZ db.t4g.small             | **~$58** | failover handled |
+| Aurora Postgres SLv2 (~0.75 avg ACU)  | **~$80** | scales smoothly |
+| Cloud SQL 1 vCPU 4 GB                 | **~$64** | similar shape to RDS |
+
+Cost ratio sqlitedeploy : RDS Multi-AZ ≈ **1 : 10**. The honest counter
+is that RDS Multi-AZ does paid-for things sqlitedeploy doesn't (auto
+failover, point-in-time recovery without thought).
+
+### Read-heavy edge app
+
+10 GB data, 5 read replicas across regions for low-latency reads.
+
+| Option                                                | Monthly | Notes |
+| ----------------------------------------------------- | ------: | ----- |
+| sqlitedeploy: 1 primary + 5 replica VMs (CX22 each) + R2 | **~€23 (~$25)** | replicas scale linearly in cost and reads |
+| RDS Multi-AZ + 5 cross-region read replicas           | **$200+** | each replica is its own paid instance + cross-region transfer |
+| Aurora Global Database (1 primary + 5 secondaries)    | **$300+** | every secondary bills compute + storage replication |
+| Neon read replicas                                    | **varies** | Neon supports compute branches, billed per CU-hour |
+
+This is where the architecture pays out most: edge reads come out of cheap
+commodity VMs, the writer is unchanged, and there are no per-replica
+managed-service uplifts.
+
+<Aside type="caution">
+	**What these numbers don't include:**
+	- Engineer-hours running the VM. RDS Multi-AZ handles failover automatically; sqlitedeploy expects you to.
+	- Cross-region data transfer in either direction (typically $0.02–$0.09/GB on AWS).
+	- Backup-restore time and operational drills. With sqld + bottomless, restore is `--sync-from-storage` against your bucket.
+	- The cost of the migration itself if you're moving off Postgres. SQL dialect differences, JSON handling, and migration tooling add real engineering hours.
+	- Premium support contracts (relevant for RDS/Aurora/Cloud SQL at the Business tier).
+</Aside>
+
+## Sources
+
+- [AWS RDS PostgreSQL pricing](https://aws.amazon.com/rds/postgresql/pricing/)
+- [AWS Aurora pricing](https://aws.amazon.com/rds/aurora/pricing/)
+- [Aurora Serverless v2 minimum-cost setup, AWS re:Post](https://repost.aws/questions/QUbtHMLZXiS4Kppi7KMIB5YQ/aurora-serverless-v2-minimum-cost-setup-for-development-environment)
+- [Supabase pricing](https://supabase.com/pricing)
+- [Neon pricing](https://neon.com/pricing)
+- [Google Cloud SQL pricing](https://cloud.google.com/sql/pricing)
+- [Cloudflare R2 pricing](https://developers.cloudflare.com/r2/pricing/)
+- [Backblaze B2 pricing](https://www.backblaze.com/cloud-storage/pricing)
+- [Hetzner Cloud](https://www.hetzner.com/cloud)
+- [Fly.io pricing](https://fly.io/docs/about/pricing/)
+- [Vantage RDS instance browser](https://instances.vantage.sh/aws/rds/db.t4g.small)
+- [Aiven RDS instance reference](https://aiven.io/tools/instances/db.t4g.micro)

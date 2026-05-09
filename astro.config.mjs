@@ -57,6 +57,8 @@ export default defineConfig({
 						{ label: 'Bring your own storage', slug: 'guides/byo-storage' },
 						{ label: 'Read replicas', slug: 'guides/replicas' },
 						{ label: 'Connecting from edge runtimes', slug: 'guides/edge-clients' },
+						{ label: 'Benchmarks', slug: 'guides/benchmarks' },
+						{ label: 'Pricing vs Postgres', slug: 'guides/pricing' },
 					],
 				},
 				{
