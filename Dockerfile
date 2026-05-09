@@ -5,7 +5,7 @@
 # `sqlitedeploy` npm package is built against glibc; alpine/musl will
 # segfault on load.
 
-FROM node:20-slim AS builder
+FROM node:22-slim AS builder
 WORKDIR /app
 
 # pnpm via corepack. python/build-essential are needed for the few packages
@@ -22,7 +22,7 @@ COPY . .
 RUN pnpm build
 
 
-FROM node:20-slim AS runtime
+FROM node:22-slim AS runtime
 WORKDIR /app
 
 # curl: used by entry.sh to wait for sqld's /health.
