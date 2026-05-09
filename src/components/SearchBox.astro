@@ -164,6 +164,15 @@
 	}
 
 	.sd-dialog {
+		/* Center on the viewport. <dialog> centers by default in modern
+		   browsers, but Starlight injects styles that can shift it; force
+		   it explicitly so it lands dead center on every screen size. */
+		position: fixed;
+		top: 50%;
+		left: 50%;
+		transform: translate(-50%, -50%);
+		margin: 0;
+
 		width: min(42rem, 92vw);
 		max-height: 72vh;
 		padding: 0;
