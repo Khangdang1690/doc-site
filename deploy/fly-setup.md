@@ -236,15 +236,21 @@ random 502s under any concurrent load, `fly machine status` showing
 
 ---
 
-## Common gotchas
+## Common gotchas (with what we actually hit during first deploy)
 
-| Symptom | Fix |
-|---|---|
-| `Error: app name is taken` on `fly apps create` | Pick a different name; update `app =` in `fly.toml`. |
-| Build fails with "no space left on device" | Run `fly deploy --build-only` separately, then `fly deploy --image <ref>`. |
-| Cold-start times out healthcheck | Increase `grace_period` in `fly.toml` to `60s`. |
-| sqld won't start: `bucket not found` | Bucket name in Fly secrets doesn't match what you created in R2 step 1a. |
-| `Permission denied: ENOENT /data/.sqlitedeploy` | Volume not mounted. Re-run `fly volumes create data ...`. |
+| Symptom in `fly logs` | Cause | Fix |
+|---|---|---|
+| `error: unknown command "up" for "sqlitedeploy"` | npm `sqlitedeploy@latest` is still v1 (Litestream-era, uses `run`). v2 (`up`/`down`) hasn't been published. | Already handled — Dockerfile clones from GitHub source instead of `npm install -g`. |
+| `error: no sqld binary available for linux/amd64` | The committed `internal/sqld/bin/sqld-linux-amd64` is a 144-byte text placeholder; `make build-sqld` replaces it locally. | Already handled — Dockerfile pulls real sqld from `ghcr.io/tursodatabase/libsql-server:v0.24.32`. |
+| `Internal Error: LIBSQL_BOTTOMLESS_AWS_DEFAULT_REGION was not set` | sqlitedeploy's `BottomlessEnv()` sets `LIBSQL_BOTTOMLESS_AWS_REGION`; sqld v0.24.32 demands the AWS-SDK-style `…_DEFAULT_REGION`. Name mismatch. | Already handled — `entry.sh` exports both names before invoking sqlitedeploy. |
+| `error: app name is taken` on `fly apps create` | Pick a different name; update `app =` in `fly.toml`. |
+| Build fails with "no space left on device" | Layer cache full | `fly deploy --build-only`, then `fly deploy --image <ref>`. |
+| Cold-start times out healthcheck | sqld first-time bootstrap can take >30s | Increase `grace_period` in `fly.toml` to `60s`. |
+| sqld won't start: `bucket not found` | Bucket name in Fly secrets ≠ bucket created in R2 step 1a | `fly secrets list -a sqlitedeploy-docs`; reset `CF_R2_BUCKET` if mismatched. |
+| `Permission denied: ENOENT /data/.sqlitedeploy` | Volume not mounted | `fly volumes list -a sqlitedeploy-docs`; if missing, `fly volumes create data --region iad --size 1`. |
+| Machine restart-loops to "max restart count of 10" | Container exited 10 times in a row | Read the actual error above the loop. After 10 fails Fly stops retrying — every line *before* "max restart count" is the real failure. |
+| Lease conflict: `machine ID … lease currently held by … @tokens.fly.io` | Fly's web UI Launch wizard holds leases that block CLI deploys | Use ONLY `fly deploy` from CLI; never click through Fly's "Launch app" wizard a second time. |
+| Warning `app is not listening on 0.0.0.0:8080` | Fly's generic warning when no listener is detected — does NOT mean port mismatch | Ignore the port number in the warning text; check why nothing is listening at all. |
 
 ---
 

@@ -1,5 +1,7 @@
 # docs-site
 
+**Live: https://sqlitedeploy-docs.fly.dev**
+
 Documentation website for [`sqlitedeploy`](https://github.com/Khangdang1690/sqlitedeploy),
 powered by `sqlitedeploy` itself.
 
