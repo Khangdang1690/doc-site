@@ -27,8 +27,13 @@ FROM ghcr.io/tursodatabase/libsql-server:v0.24.32 AS sqld-image
 # (no commands; Stage 4 does the COPY --from=sqld-image)
 
 # ─── Stage 2: build sqlitedeploy v2 CLI from source ─────────────────────
+# Pin to a published tag so BuildKit's cache key on the `git clone` step is
+# stable per release. Bumping SQLITEDEPLOY_REF to a new tag busts the cache
+# and pulls fresh source. Override at build time with:
+#   fly deploy --build-arg SQLITEDEPLOY_REF=main
+# to deploy off the upstream main between releases.
 FROM golang:1.25-bookworm AS sqlitedeploy-builder
-ARG SQLITEDEPLOY_REF=main
+ARG SQLITEDEPLOY_REF=v0.5.1
 RUN apt-get update && \
     apt-get install -y --no-install-recommends git ca-certificates && \
     rm -rf /var/lib/apt/lists/*
