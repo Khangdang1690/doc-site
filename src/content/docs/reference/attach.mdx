@@ -1,0 +1,39 @@
+---
+title: sqlitedeploy attach
+description: Bootstrap a read replica that streams WAL frames from a primary.
+---
+
+```
+sqlitedeploy attach [flags]
+```
+
+Used on a second host to spin up a read-only replica of an existing
+primary. First run cold-restores from the primary's bucket, then streams
+WAL frames over gRPC for sub-second freshness.
+
+## Flags
+
+| Flag | Description |
+|---|---|
+| `--primary-grpc-url` | gRPC URL of the primary (e.g. `http://primary.example.com:5001`) |
+| `--auth-jwt-key-file` | Path to the primary's `jwt_public.pem` |
+| `--replica-token` | The JWT used to authenticate against the primary's gRPC |
+| `--http-listen-addr` | Where this replica's Hrana HTTP listens (default `127.0.0.1:8080`) |
+| `-C, --project-dir` | Project directory |
+
+## Example
+
+```bash
+# On the primary, copy these to the replica:
+scp .sqlitedeploy/auth/jwt_public.pem  replica:/tmp/
+scp .sqlitedeploy/auth/replica.jwt     replica:/tmp/
+
+# On the replica VM:
+sqlitedeploy attach \
+  --primary-grpc-url http://primary.example.com:5001 \
+  --auth-jwt-key-file /tmp/jwt_public.pem \
+  --replica-token "$(cat /tmp/replica.jwt)" \
+  --http-listen-addr 0.0.0.0:8080
+```
+
+See [Read replicas](/guides/replicas/) for the full walkthrough.

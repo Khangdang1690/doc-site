@@ -1,0 +1,62 @@
+---
+title: sqlitedeploy up
+description: Provision storage, start sqld, and open a public Cloudflare Tunnel.
+---
+
+The headline command. First run provisions storage and writes
+`.sqlitedeploy/config.yml`; subsequent runs reuse the saved config.
+
+```
+sqlitedeploy up [flags]
+```
+
+## Flags
+
+| Flag | Default | Description |
+|---|---|---|
+| `--provider` | `r2` | Storage backend: `r2` \| `b2` \| `s3` |
+| `--bucket` | derived | Bucket name (managed mode: optional, auto-derived from project dir) |
+| `--account-id` | | Cloudflare R2 account ID (manual mode only) |
+| `--region` | | Bucket region (B2/S3) |
+| `--endpoint` | | S3 endpoint override (S3 only; e.g. for MinIO) |
+| `--access-key` | env `SQLITEDEPLOY_ACCESS_KEY` | Access key — supplying this triggers manual mode |
+| `--secret-key` | env `SQLITEDEPLOY_SECRET_KEY` | Secret key |
+| `--bucket-prefix` | `db` | Bottomless prefix within the bucket (lets multiple databases share one bucket) |
+| `--http-listen-addr` | `127.0.0.1:8080` | Where sqld serves Hrana-over-HTTP locally |
+| `--grpc-listen-addr` | `0.0.0.0:5001` | Where sqld serves gRPC for replica nodes |
+| `--no-tunnel` | `false` | Skip the Cloudflare Tunnel; expose only locally |
+| `--byo-storage` | `false` | Skip the managed R2 flow; use `--access-key` / `--secret-key` |
+| `-C, --project-dir` | cwd | Project directory |
+
+## Examples
+
+```bash
+# The blessed path: managed R2 + quick tunnel.
+sqlitedeploy up
+
+# Self-hosted: own bucket, own reverse proxy.
+sqlitedeploy up \
+  --byo-storage --no-tunnel \
+  --provider s3 --bucket my-db --region us-east-1 \
+  --http-listen-addr 0.0.0.0:8080
+
+# Two projects sharing one R2 bucket.
+sqlitedeploy up --bucket-prefix billing
+sqlitedeploy up --bucket-prefix orders -C ../orders
+```
+
+## What it writes
+
+| Path | Purpose |
+|---|---|
+| `.sqlitedeploy/config.yml` | Provider settings, listen addrs, JWT paths |
+| `.sqlitedeploy/db/dbs/default/data` | The actual SQLite file |
+| `.sqlitedeploy/auth/jwt_public.pem` | Public key for sqld's JWT verifier |
+| `.sqlitedeploy/auth/jwt_private.pem` | Private key — back this up |
+| `.sqlitedeploy/auth/replica.jwt` | Long-lived auth token for clients & replicas |
+
+## See also
+
+- [`sqlitedeploy down`](/reference/down/) — teardown
+- [`sqlitedeploy attach`](/reference/attach/) — set up a read replica
+- [Bring your own storage](/guides/byo-storage/) — non-R2 setups

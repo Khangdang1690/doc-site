@@ -1,0 +1,36 @@
+# /etc/systemd/system/docs-site.service
+#
+# Runs the Astro Node SSR server. Depends on sqlitedeploy.service so sqld is
+# already accepting connections when the docs site starts up.
+
+[Unit]
+Description=docs.sqlitedeploy.dev (Astro Node SSR)
+After=sqlitedeploy.service
+Requires=sqlitedeploy.service
+
+[Service]
+Type=simple
+User=docs
+Group=docs
+WorkingDirectory=/opt/docs/current
+EnvironmentFile=/opt/docs/env
+ExecStart=/usr/bin/node ./dist/server/entry.mjs
+Restart=on-failure
+RestartSec=5
+
+# Sandboxing — Astro only reads its own dist + writes to /tmp.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/opt/docs/current
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true
+RestrictRealtime=true
+
+[Install]
+WantedBy=multi-user.target

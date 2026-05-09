@@ -1,0 +1,29 @@
+# /etc/caddy/Caddyfile
+#
+# Replace `docs.sqlitedeploy.dev` with your real hostname before installing.
+# This config assumes a Cloudflare Origin Certificate is at
+# /etc/caddy/certs/origin.{pem,key} and SSL/TLS mode in the Cloudflare
+# dashboard is set to Full (strict).
+
+docs.sqlitedeploy.dev {
+	tls /etc/caddy/certs/origin.pem /etc/caddy/certs/origin.key
+	encode zstd gzip
+
+	# Astro's Node SSR adapter listens here (see /etc/systemd/system/docs-site.service).
+	reverse_proxy 127.0.0.1:4321 {
+		# Pass through Cloudflare's true-client headers if you ever turn the
+		# orange cloud off and want real client IPs in the Astro logs.
+		header_up X-Real-IP {http.request.header.CF-Connecting-IP}
+	}
+
+	# Static asset cache. Astro fingerprints filenames so this is safe.
+	@astro_assets path /_astro/*
+	header @astro_assets Cache-Control "public, max-age=31536000, immutable"
+
+	log {
+		output file /var/log/caddy/docs-site.log {
+			roll_size 50mb
+			roll_keep 5
+		}
+	}
+}

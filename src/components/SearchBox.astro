@@ -1,0 +1,224 @@
+---
+// Replaces Starlight's default Pagefind search. Calls /api/search which runs
+// an FTS5 query against the sqld instance. The component is rendered in the
+// site header by Starlight's `components.Search` override (see astro.config.mjs).
+---
+
+<div class="sd-search">
+	<button type="button" class="sd-trigger" aria-label="Search" data-open-search>
+		<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+			<circle cx="11" cy="11" r="8"></circle>
+			<path d="m21 21-4.35-4.35"></path>
+		</svg>
+		<span>Search</span>
+		<kbd>⌘K</kbd>
+	</button>
+
+	<dialog class="sd-dialog" aria-label="Search documentation">
+		<form class="sd-form" role="search">
+			<input
+				type="search"
+				name="q"
+				placeholder="Search docs…"
+				autocomplete="off"
+				autocorrect="off"
+				autocapitalize="off"
+				spellcheck="false"
+			/>
+			<button type="button" class="sd-close" data-close-search aria-label="Close">Esc</button>
+		</form>
+		<ul class="sd-results" aria-live="polite"></ul>
+		<p class="sd-empty" hidden>No matches.</p>
+		<p class="sd-hint">Powered by SQLite FTS5 on a sqld instance — see <a href="/guides/how-it-works/">How it works</a>.</p>
+	</dialog>
+</div>
+
+<script>
+	type Hit = { slug: string; title: string; description: string; snippet: string };
+
+	const trigger = document.querySelector<HTMLButtonElement>('[data-open-search]');
+	const dialog = document.querySelector<HTMLDialogElement>('.sd-dialog');
+	const closeBtn = document.querySelector<HTMLButtonElement>('[data-close-search]');
+	const input = dialog?.querySelector<HTMLInputElement>('input[name="q"]');
+	const results = dialog?.querySelector<HTMLUListElement>('.sd-results');
+	const empty = dialog?.querySelector<HTMLParagraphElement>('.sd-empty');
+
+	if (!trigger || !dialog || !input || !results || !empty || !closeBtn) {
+		// Should never happen — fail silent rather than break the page.
+		console.warn('SearchBox: missing required nodes');
+	} else {
+		const open = () => {
+			dialog.showModal();
+			input.value = '';
+			results.innerHTML = '';
+			empty.hidden = true;
+			requestAnimationFrame(() => input.focus());
+		};
+		const close = () => dialog.close();
+
+		trigger.addEventListener('click', open);
+		closeBtn.addEventListener('click', close);
+
+		document.addEventListener('keydown', (e) => {
+			if ((e.key === 'k' || e.key === 'K') && (e.metaKey || e.ctrlKey)) {
+				e.preventDefault();
+				open();
+			}
+		});
+
+		dialog.addEventListener('click', (e) => {
+			// Click on backdrop closes; click inside the form does not.
+			if (e.target === dialog) close();
+		});
+
+		let abort: AbortController | null = null;
+		let timer: ReturnType<typeof setTimeout> | null = null;
+
+		const render = (hits: Hit[]) => {
+			if (hits.length === 0) {
+				results.innerHTML = '';
+				empty.hidden = false;
+				return;
+			}
+			empty.hidden = true;
+			results.innerHTML = hits
+				.map((h) => `
+					<li>
+						<a href="/${h.slug}/">
+							<strong>${escapeHtml(h.title)}</strong>
+							${h.description ? `<small>${escapeHtml(h.description)}</small>` : ''}
+							<span class="sd-snippet">${h.snippet}</span>
+						</a>
+					</li>
+				`)
+				.join('');
+		};
+
+		input.addEventListener('input', () => {
+			if (timer) clearTimeout(timer);
+			if (abort) abort.abort();
+			const q = input.value.trim();
+			if (q.length < 2) {
+				results.innerHTML = '';
+				empty.hidden = true;
+				return;
+			}
+			timer = setTimeout(async () => {
+				abort = new AbortController();
+				try {
+					const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`, { signal: abort.signal });
+					if (!res.ok) throw new Error(`HTTP ${res.status}`);
+					const hits = (await res.json()) as Hit[];
+					render(hits);
+				} catch (err) {
+					if (!(err instanceof DOMException && err.name === 'AbortError')) {
+						results.innerHTML = `<li class="sd-error">Search unavailable: ${escapeHtml(String(err))}</li>`;
+					}
+				}
+			}, 120);
+		});
+	}
+
+	function escapeHtml(s: string): string {
+		return s.replace(/[&<>"']/g, (c) =>
+			({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] ?? c),
+		);
+	}
+</script>
+
+<style>
+	.sd-search { display: inline-flex; align-items: center; }
+
+	.sd-trigger {
+		display: inline-flex; align-items: center; gap: 0.5rem;
+		padding: 0.35rem 0.7rem;
+		font: inherit;
+		color: var(--sl-color-gray-2);
+		background: var(--sl-color-gray-6);
+		border: 1px solid var(--sl-color-gray-5);
+		border-radius: 0.5rem;
+		cursor: pointer;
+		min-width: 11rem;
+	}
+	.sd-trigger:hover { border-color: var(--sl-color-gray-4); }
+	.sd-trigger kbd {
+		margin-left: auto;
+		font: inherit; font-size: 0.7rem;
+		padding: 0.1rem 0.35rem;
+		background: var(--sl-color-gray-7);
+		border-radius: 0.25rem;
+		border: 1px solid var(--sl-color-gray-5);
+	}
+
+	.sd-dialog {
+		width: min(40rem, 90vw);
+		max-height: 70vh;
+		padding: 0;
+		border: 1px solid var(--sl-color-gray-5);
+		border-radius: 0.75rem;
+		background: var(--sl-color-bg);
+		color: var(--sl-color-text);
+		box-shadow: 0 1.5rem 3rem -1rem rgba(0,0,0,0.4);
+		overflow: hidden;
+	}
+	.sd-dialog::backdrop { background: rgba(0,0,0,0.5); }
+
+	.sd-form {
+		display: flex; align-items: center; gap: 0.5rem;
+		padding: 0.75rem 1rem;
+		border-bottom: 1px solid var(--sl-color-gray-5);
+	}
+	.sd-form input {
+		flex: 1;
+		font: inherit; font-size: 1rem;
+		padding: 0.4rem 0;
+		background: transparent;
+		color: inherit;
+		border: none; outline: none;
+	}
+	.sd-close {
+		font: inherit; font-size: 0.75rem;
+		padding: 0.25rem 0.5rem;
+		background: var(--sl-color-gray-6);
+		color: var(--sl-color-gray-2);
+		border: 1px solid var(--sl-color-gray-5);
+		border-radius: 0.35rem;
+		cursor: pointer;
+	}
+
+	.sd-results {
+		list-style: none; padding: 0; margin: 0;
+		max-height: calc(70vh - 6rem);
+		overflow-y: auto;
+	}
+	.sd-results li { border-bottom: 1px solid var(--sl-color-gray-6); }
+	.sd-results li:last-child { border-bottom: none; }
+	.sd-results a {
+		display: block;
+		padding: 0.75rem 1rem;
+		color: inherit; text-decoration: none;
+	}
+	.sd-results a:hover, .sd-results a:focus { background: var(--sl-color-gray-6); }
+	.sd-results strong { display: block; font-size: 0.95rem; }
+	.sd-results small { display: block; color: var(--sl-color-gray-3); font-size: 0.8rem; margin-top: 0.15rem; }
+	.sd-snippet {
+		display: block;
+		font-size: 0.85rem;
+		color: var(--sl-color-gray-2);
+		margin-top: 0.35rem;
+		line-height: 1.4;
+	}
+	.sd-snippet :global(mark) {
+		background: var(--sl-color-accent-low);
+		color: var(--sl-color-accent-high);
+		padding: 0 0.15rem;
+		border-radius: 0.15rem;
+	}
+
+	.sd-empty, .sd-hint {
+		margin: 0; padding: 0.75rem 1rem;
+		color: var(--sl-color-gray-3); font-size: 0.85rem;
+	}
+	.sd-hint { border-top: 1px solid var(--sl-color-gray-6); }
+	.sd-error { padding: 0.75rem 1rem; color: var(--sl-color-red); }
+</style>

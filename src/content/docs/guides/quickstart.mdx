@@ -1,0 +1,110 @@
+---
+title: Quickstart
+description: From zero to a live SQLite database with a public HTTPS URL in two commands.
+---
+
+import { Steps, Tabs, TabItem, Code } from '@astrojs/starlight/components';
+
+This guide gets you a publicly reachable sqld endpoint with WAL replicated
+to Cloudflare R2 — all on free tiers.
+
+## Prerequisites
+
+- Linux or macOS (Windows users: WSL2)
+- A Cloudflare account (free is fine)
+
+## Install
+
+<Tabs syncKey="install">
+	<TabItem label="npm">
+		```bash
+		npm install -g sqlitedeploy
+		```
+	</TabItem>
+	<TabItem label="pip">
+		```bash
+		pip install sqlitedeploy
+		```
+	</TabItem>
+	<TabItem label="Go">
+		```bash
+		go install github.com/Khangdang1690/sqlitedeploy/cmd/sqlitedeploy@latest
+		```
+	</TabItem>
+	<TabItem label="Maven">
+		```xml
+		<dependency>
+		  <groupId>dev.sqlitedeploy</groupId>
+		  <artifactId>sqlitedeploy-cli</artifactId>
+		</dependency>
+		```
+	</TabItem>
+</Tabs>
+
+## Bring it live
+
+<Steps>
+
+1. **Authenticate against Cloudflare** (one-time):
+
+   ```bash
+   sqlitedeploy auth login
+   ```
+
+   This opens your browser to mint a scoped API token with R2 permissions.
+   The token is saved to `~/.config/sqlitedeploy/credentials.yml`.
+
+2. **Start everything**:
+
+   ```bash
+   sqlitedeploy up
+   ```
+
+   First run provisions an R2 bucket (10 GB free, $0 egress), generates an
+   Ed25519 JWT keypair, starts the bundled sqld with bottomless replication,
+   and opens a Cloudflare quick tunnel. You'll see something like:
+
+   ```
+   ✓ Your SQLite is live!
+
+     Public URL:  libsql://big-river-1234.trycloudflare.com
+     Auth token:  eyJhbGciOiJFZERTQSI…
+     Local file:  /home/you/.sqlitedeploy/db/dbs/default/data
+     Provider:    r2 (bucket=…, prefix=db)
+   ```
+
+3. **Connect from your app** with `@libsql/client`:
+
+   ```ts
+   import { createClient } from "@libsql/client";
+
+   const db = createClient({
+     url: "libsql://big-river-1234.trycloudflare.com",
+     authToken: process.env.SQLITEDEPLOY_REPLICA_JWT,
+   });
+
+   const rows = await db.execute("SELECT sqlite_version()");
+   console.log(rows.rows[0]);
+   ```
+
+</Steps>
+
+## What you got
+
+| Piece | Where it lives |
+|---|---|
+| SQLite database file | `.sqlitedeploy/db/dbs/default/data` |
+| JWT public key | `.sqlitedeploy/auth/jwt_public.pem` |
+| JWT private key | `.sqlitedeploy/auth/jwt_private.pem` (back this up!) |
+| Replica auth token | `.sqlitedeploy/auth/replica.jwt` |
+| Local sqld endpoint | `127.0.0.1:8080` (Hrana HTTP) |
+| Public endpoint | `https://*.trycloudflare.com` (rotates each run) |
+
+## Next
+
+- For a stable hostname instead of `*.trycloudflare.com`, run with
+  [`--no-tunnel`](/guides/byo-storage/) and front sqld with your own
+  reverse proxy.
+- To replicate reads to other regions, see [Read replicas](/guides/replicas/).
+- To call sqld from Cloudflare Workers, see
+  [Connecting from edge runtimes](/guides/edge-clients/).

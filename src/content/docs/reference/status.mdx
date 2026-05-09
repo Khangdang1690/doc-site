@@ -1,0 +1,30 @@
+---
+title: sqlitedeploy status
+description: Show the configured endpoints, paths, and local DB size.
+---
+
+```
+sqlitedeploy status [flags]
+```
+
+A read-only diagnostic. Prints the project's role (primary or replica),
+the configured listen addresses, the SQLite file path, the bucket info,
+and the size on disk.
+
+## Example output
+
+```
+Project:        /home/you/myapp/.sqlitedeploy
+Role:           primary
+HTTP listen:    127.0.0.1:8080  (Hrana)
+gRPC listen:    0.0.0.0:5001    (replica streaming)
+DB file:        .sqlitedeploy/db/dbs/default/data  (12.4 MiB)
+Provider:       r2
+  Bucket:       my-app-db
+  Endpoint:     https://1a2b3c.r2.cloudflarestorage.com
+  Prefix:       db
+JWT keys:       .sqlitedeploy/auth/jwt_{public,private}.pem
+```
+
+This command does not connect to sqld or to the bucket — it only reads
+local config. If sqld isn't running, `status` still works.

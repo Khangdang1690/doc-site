@@ -1,0 +1,101 @@
+---
+title: Bring your own storage
+description: Use Backblaze B2, AWS S3, MinIO, or any S3-compatible store instead of the managed R2 flow.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+The default `sqlitedeploy up` provisions a Cloudflare R2 bucket for you.
+If you'd rather use a bucket you already manage — including non-Cloudflare
+ones — pass `--byo-storage` and supply credentials directly.
+
+## Backblaze B2
+
+```bash
+sqlitedeploy up \
+  --byo-storage \
+  --provider b2 \
+  --bucket my-app-db \
+  --region us-east-005 \
+  --access-key $B2_KEY_ID \
+  --secret-key $B2_APPLICATION_KEY
+```
+
+## AWS S3
+
+```bash
+sqlitedeploy up \
+  --byo-storage \
+  --provider s3 \
+  --bucket my-app-db \
+  --region us-east-1 \
+  --access-key $AWS_ACCESS_KEY_ID \
+  --secret-key $AWS_SECRET_ACCESS_KEY
+```
+
+## MinIO / generic S3
+
+```bash
+sqlitedeploy up \
+  --byo-storage \
+  --provider s3 \
+  --bucket my-app-db \
+  --endpoint http://minio.local:9000 \
+  --region us-east-1 \
+  --access-key $MINIO_KEY \
+  --secret-key $MINIO_SECRET
+```
+
+`--endpoint` is the only S3-specific knob; everything else is the standard
+S3 API.
+
+## Skip the public tunnel
+
+Pair `--byo-storage` with `--no-tunnel` to keep sqld on localhost. You'll
+need your own reverse proxy + TLS terminator for public access:
+
+```bash
+sqlitedeploy up \
+  --byo-storage --no-tunnel \
+  --provider s3 --bucket my-db \
+  --endpoint $S3_ENDPOINT \
+  --access-key $KEY --secret-key $SECRET \
+  --http-listen-addr 0.0.0.0:8080
+```
+
+A minimal Caddy config in front:
+
+```
+db.example.com {
+  reverse_proxy 127.0.0.1:8080
+}
+```
+
+## Credentials via environment
+
+You can also set credentials via env, which keeps them out of shell history
+and is friendlier to systemd `EnvironmentFile=`:
+
+```bash
+export SQLITEDEPLOY_ACCESS_KEY=…
+export SQLITEDEPLOY_SECRET_KEY=…
+sqlitedeploy up --byo-storage --provider s3 --bucket my-db --region us-east-1
+```
+
+## Sharing one bucket across databases
+
+If you have multiple sqlitedeploy projects and want them in the same
+bucket, set a different prefix per project:
+
+```bash
+sqlitedeploy up --byo-storage … --bucket-prefix prod-billing
+```
+
+The default prefix is `db`. Two projects with different prefixes won't
+collide.
+
+<Aside>
+	The bucket layout is bottomless's, not LiteFS's. If you migrated from
+	v1 (Litestream), use a fresh bucket prefix — the formats are not
+	compatible.
+</Aside>

@@ -1,0 +1,47 @@
+---
+title: sqlitedeploy auth
+description: Manage the Cloudflare API token used by managed-mode commands.
+---
+
+```
+sqlitedeploy auth <login | status | logout>
+```
+
+`auth` only matters for the managed Cloudflare R2 flow. If you always run
+with `--byo-storage`, you can skip this entirely.
+
+## `auth login`
+
+Opens a browser to mint a scoped Cloudflare API token (R2 + Tokens
+permissions). The token is saved to
+`~/.config/sqlitedeploy/credentials.yml` with `0600` permissions.
+
+```bash
+sqlitedeploy auth login
+```
+
+The token has no expiry; it's revocable from the Cloudflare dashboard
+under **My Profile → API Tokens**.
+
+## `auth status`
+
+Prints the Cloudflare account the saved token authenticates as:
+
+```bash
+sqlitedeploy auth status
+# → Authenticated as: you@example.com (account: 1a2b3c…)
+```
+
+Returns a non-zero exit code if no token is saved or the token is
+invalid — useful in CI to bail early.
+
+## `auth logout`
+
+Forgets the saved token:
+
+```bash
+sqlitedeploy auth logout
+```
+
+This only deletes the local credential file. The token itself is **not**
+revoked on Cloudflare's side — do that from the dashboard if you need to.

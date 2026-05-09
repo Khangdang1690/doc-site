@@ -1,49 +1,126 @@
-# Starlight Starter Kit: Basics
+# docs-site
 
-[![Built with Starlight](https://astro.badg.es/v2/built-with-starlight/tiny.svg)](https://starlight.astro.build)
+Documentation website for [`sqlitedeploy`](https://github.com/Khangdang1690/sqlitedeploy),
+powered by `sqlitedeploy` itself.
+
+The site is built with **Astro Starlight** and runs in hybrid mode (static
+pages + a single SSR API route) on the Node adapter. Search is backed by
+**SQLite FTS5** inside a sqld instance; the index is rebuilt at every
+build by `scripts/index-search.ts`. WAL replicates to **Cloudflare R2**
+via bottomless. Everything lives on **Oracle Cloud Always Free**
+(Ampere A1 ARM, 4 OCPU / 24 GB).
+
+## Stack
+
+| Layer | Choice |
+|---|---|
+| Framework | Astro 6 + Starlight 0.39 |
+| Runtime | Node 20 (Astro `@astrojs/node` standalone) |
+| DB | sqld (via `sqlitedeploy up --no-tunnel`) |
+| Search | SQLite FTS5 (`docs_fts` virtual table) |
+| Object storage | Cloudflare R2 (10 GB free, $0 egress) |
+| TLS / proxy | Caddy + Cloudflare Origin Certificate |
+| Edge / CDN | Cloudflare proxy (orange cloud) |
+| Host | Oracle Cloud Always Free Ampere A1 |
+
+## Local dev
+
+```bash
+pnpm install
+pnpm dev          # http://localhost:4321
+```
+
+Search will return `500 Internal Server Error` locally because
+`LIBSQL_URL` is unset. To exercise it end-to-end:
+
+```bash
+# In one terminal:
+sqlitedeploy dev
+
+# In another:
+export LIBSQL_URL=http://127.0.0.1:8080
+export LIBSQL_AUTH_TOKEN=any-string-works-in-dev-mode
+pnpm reindex      # populates docs_fts in the local sqld
+pnpm dev
+```
+
+## Production deploy
+
+See [`deploy/README.md`](./deploy/README.md) for the Oracle Cloud +
+Cloudflare setup walkthrough. tl;dr:
+
+1. Create a Cloudflare account → register a domain → set DNS to Cloudflare,
+   SSL/TLS to **Full (strict)**, generate an Origin Certificate.
+2. Provision an Oracle Cloud Ampere A1 VM (Ubuntu 22.04 ARM64). Open ports
+   80 + 443 in the VCN security list **and** in iptables.
+3. SSH in. Install Node, pnpm, Caddy, and `npm i -g sqlitedeploy`.
+4. As the `sqld` user: `sqlitedeploy auth login` then
+   `sqlitedeploy up --no-tunnel`. Capture the replica JWT.
+5. Drop in the systemd units, Caddyfile, and Origin Certificate from
+   `deploy/`. `systemctl enable --now sqlitedeploy docs-site caddy`.
+6. Run `deploy/deploy.sh` to build + reindex + start.
+
+## Project layout
 
 ```
-pnpm create astro@latest -- --template starlight
-```
-
-> 🧑‍🚀 **Seasoned astronaut?** Delete this file. Have fun!
-
-## 🚀 Project Structure
-
-Inside of your Astro + Starlight project, you'll see the following folders and files:
-
-```
-.
-├── public/
+docs-site/
+├── astro.config.mjs              # Starlight config + Node adapter
 ├── src/
-│   ├── assets/
-│   ├── content/
-│   │   └── docs/
-│   └── content.config.ts
-├── astro.config.mjs
-├── package.json
-└── tsconfig.json
+│   ├── content/docs/
+│   │   ├── index.mdx             # Landing page
+│   │   ├── guides/*.mdx          # Quickstart, How-it-works, BYO storage, …
+│   │   └── reference/*.mdx       # CLI reference (up, down, attach, dev, auth, status)
+│   ├── components/
+│   │   └── SearchBox.astro       # Replaces Starlight's default search
+│   └── pages/
+│       └── api/
+│           └── search.ts         # SSR endpoint, runs FTS5 query
+├── scripts/
+│   └── index-search.ts           # Build-time indexer; postbuild script
+├── deploy/                       # Files to ship to the Oracle VM
+│   ├── Caddyfile
+│   ├── env.example
+│   ├── deploy.sh
+│   └── systemd/
+│       ├── sqlitedeploy.service
+│       └── docs-site.service
+└── package.json
 ```
 
-Starlight looks for `.md` or `.mdx` files in the `src/content/docs/` directory. Each file is exposed as a route based on its file name.
+## How search works
 
-Images can be added to `src/assets/` and embedded in Markdown with a relative link.
+```
+  ┌─────────────────────────────────────┐
+  │  Build time (on the VM)             │
+  │  ─────────                          │
+  │  pnpm build                         │
+  │   └─ astro build  → dist/           │
+  │   └─ postbuild    → tsx scripts/index-search.ts
+  │                       │             │
+  │                       ▼             │
+  │  sqld :8080 ─── INSERT INTO docs_fts (slug,title,description,body)
+  │   │                                 │
+  │   ▼ bottomless (async)              │
+  │  Cloudflare R2 bucket               │
+  └─────────────────────────────────────┘
 
-Static assets, like favicons, can be placed in the `public/` directory.
+  ┌─────────────────────────────────────┐
+  │  Request time                       │
+  │  ────────────                       │
+  │  GET /api/search?q=replicas         │
+  │   └─ Astro Node SSR (/api/search.ts)│
+  │       └─ libsql client → sqld :8080 │
+  │           └─ SELECT … FROM docs_fts │
+  │              WHERE docs_fts MATCH ? │
+  │                                     │
+  │  → JSON: [{ slug, title, snippet }] │
+  └─────────────────────────────────────┘
+```
 
-## 🧞 Commands
+The build inserts; sqld (running on the same VM) serves reads. The user
+sees a search box that talks to `/api/search`, which Caddy proxies to
+Astro on `127.0.0.1:4321`, which queries sqld on `127.0.0.1:8080`.
 
-All commands are run from the root of the project, from a terminal:
+## License
 
-| Command                   | Action                                           |
-| :------------------------ | :----------------------------------------------- |
-| `pnpm install`             | Installs dependencies                            |
-| `pnpm dev`             | Starts local dev server at `localhost:4321`      |
-| `pnpm build`           | Build your production site to `./dist/`          |
-| `pnpm preview`         | Preview your build locally, before deploying     |
-| `pnpm astro ...`       | Run CLI commands like `astro add`, `astro check` |
-| `pnpm astro -- --help` | Get help using the Astro CLI                     |
-
-## 👀 Want to learn more?
-
-Check out [Starlight’s docs](https://starlight.astro.build/), read [the Astro documentation](https://docs.astro.build), or jump into the [Astro Discord server](https://astro.build/chat).
+MIT.

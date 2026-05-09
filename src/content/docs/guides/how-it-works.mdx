@@ -1,0 +1,111 @@
+---
+title: How it works
+description: The pieces sqlitedeploy stitches together — sqld, bottomless, JWT auth, and Cloudflare Tunnel.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+`sqlitedeploy` is glue code. It composes four well-tested components into
+a single CLI that's friendly to free tiers.
+
+## The components
+
+```
+        Your app                 Read replicas              Cloudflare Worker /
+        (any HTTP client)        (other VMs)                Lambda / Vercel
+              │                       │                            │
+              └───────── Hrana over HTTPS ──────────────┐          │
+                                                        ▼          │
+                                            Cloudflare Tunnel  ←───┘
+                                                        │
+                                                        ▼
+                            ┌──────────────────────────────────────┐
+                            │  Primary host                         │
+                            │  ────────────                         │
+                            │  sqld :8080 (Hrana HTTP)              │
+                            │  sqld :5001 (gRPC for replicas) ──────┼──▶ replicas
+                            │   │                                   │
+                            │   ▼                                   │
+                            │  bottomless ──── async WAL frames ────┼──▶ S3-compatible bucket
+                            │                                       │     (R2 / B2 / S3 / MinIO)
+                            └──────────────────────────────────────┘
+```
+
+### sqld
+
+The libSQL server. Owns the SQLite file, serves the
+[Hrana protocol](https://github.com/tursodatabase/libsql/blob/main/docs/HRANA_3_SPEC.md)
+over HTTP and WebSocket on port 8080, and serves a gRPC stream on 5001 that
+read replicas pull WAL frames from.
+
+`sqlitedeploy` ships pre-built sqld binaries for Linux x64, Linux ARM64,
+and macOS, so you don't compile anything.
+
+### bottomless
+
+A subsystem of sqld that asynchronously ships WAL frames to S3-compatible
+object storage. On startup, sqld can rebuild the database from the bucket
+(`--sync-from-storage`) — that's how you cold-restore.
+
+<Aside type="caution">
+	Bottomless is **async durable**: the last few seconds of writes can be
+	lost if the primary crashes before the next flush. For workloads that
+	require strict durability, run sqld with `WAL fsync` enabled and accept
+	the latency cost.
+</Aside>
+
+### JWT auth
+
+Every connection to sqld is gated by an Ed25519-signed JWT. The CLI:
+
+1. Generates a keypair on first `up` (saved to `.sqlitedeploy/auth/`).
+2. Mints a long-lived **replica token** (`.sqlitedeploy/auth/replica.jwt`)
+   that read replicas and apps use to authenticate.
+3. Passes the **public** key to sqld via `--auth-jwt-key-file` so sqld can
+   verify tokens without holding the private key.
+
+If you lose the private key, you can't mint new tokens — back it up.
+
+### Cloudflare Tunnel
+
+To skip the "buy a domain, configure DNS, terminate TLS" yak-shave for
+people just trying things out, `up` shells out to `cloudflared` and opens
+a free **quick tunnel**. You get a `https://random.trycloudflare.com` URL
+pointed at your local sqld.
+
+The hostname rotates on each run. For a stable production endpoint, pass
+[`--no-tunnel`](/guides/byo-storage/) and run your own reverse proxy.
+
+## What `up` actually does
+
+Under the hood, `sqlitedeploy up` runs roughly this sequence
+(see [`internal/cli/up.go`](https://github.com/Khangdang1690/sqlitedeploy/blob/main/internal/cli/up.go)):
+
+```
+  config exists?
+    └── yes: load it, skip provisioning
+    └── no:  provision storage (R2 bucket + scoped key) → save .sqlitedeploy/config.yml
+
+  bootstrap auth (idempotent)
+    └── generate Ed25519 keypair if missing
+    └── mint replica.jwt if missing
+
+  spawn sqld with PrimaryOpts
+    └── --http-listen-addr      127.0.0.1:8080
+    └── --grpc-listen-addr      0.0.0.0:5001
+    └── --auth-jwt-key-file     .sqlitedeploy/auth/jwt_public.pem
+    └── env LIBSQL_BOTTOMLESS_*  (provider creds)
+
+  wait for :8080 to accept TCP
+    └── timeout 15s
+
+  if not --no-tunnel:
+    └── shell out to `cloudflared tunnel --url http://127.0.0.1:8080`
+    └── parse public URL from stdout
+
+  print summary, hand off to user (Ctrl-C to stop)
+```
+
+There is no daemon, no background process, no agent. Stop the foreground
+process and the tunnel goes down with it; sqld and bottomless keep your
+data on the local SQLite file and (asynchronously) in the bucket.

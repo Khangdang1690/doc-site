@@ -1,0 +1,131 @@
+---
+title: Connecting from edge runtimes
+description: Use @libsql/client from Cloudflare Workers, AWS Lambda, Vercel, and FastAPI.
+---
+
+import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
+
+sqld speaks the [Hrana protocol over HTTP](https://github.com/tursodatabase/libsql/blob/main/docs/HRANA_3_SPEC.md),
+so any HTTP-capable runtime can query it. The official client is
+[`@libsql/client`](https://www.npmjs.com/package/@libsql/client) for
+JS/TS and [`libsql-client`](https://pypi.org/project/libsql-client/) for
+Python.
+
+## Required env vars
+
+| Variable | Value |
+|---|---|
+| `LIBSQL_URL` | The public URL printed by `sqlitedeploy up` (or your custom domain) |
+| `LIBSQL_AUTH_TOKEN` | Contents of `.sqlitedeploy/auth/replica.jwt` |
+
+<Aside type="caution">
+	Never commit `replica.jwt`. Use your platform's secret store
+	(Wrangler secrets, Vercel encrypted env vars, GitHub Actions secrets).
+</Aside>
+
+## Cloudflare Workers
+
+<Tabs>
+	<TabItem label="src/worker.ts">
+		```ts
+		import { createClient, type Client } from "@libsql/client";
+
+		interface Env {
+			LIBSQL_URL: string;
+			LIBSQL_AUTH_TOKEN: string;
+		}
+
+		let cached: Client | null = null;
+		const client = (env: Env) =>
+			cached ??= createClient({
+				url: env.LIBSQL_URL,
+				authToken: env.LIBSQL_AUTH_TOKEN,
+			});
+
+		export default {
+			async fetch(_req: Request, env: Env) {
+				const result = await client(env).execute("SELECT sqlite_version() AS v");
+				return Response.json(result.rows[0]);
+			},
+		};
+		```
+	</TabItem>
+	<TabItem label="wrangler.toml">
+		```toml
+		name = "my-worker"
+		main = "src/worker.ts"
+		compatibility_date = "2026-01-01"
+
+		[vars]
+		LIBSQL_URL = "https://big-river-1234.trycloudflare.com"
+		# LIBSQL_AUTH_TOKEN is set via: wrangler secret put LIBSQL_AUTH_TOKEN
+		```
+	</TabItem>
+</Tabs>
+
+This is exactly the pattern in the project's
+[`examples/cloudflare-workers-readonly`](https://github.com/Khangdang1690/sqlitedeploy/tree/main/examples/cloudflare-workers-readonly).
+
+## AWS Lambda (Node.js)
+
+```ts
+import { createClient } from "@libsql/client";
+
+const db = createClient({
+	url: process.env.LIBSQL_URL!,
+	authToken: process.env.LIBSQL_AUTH_TOKEN!,
+});
+
+export const handler = async () => {
+	const rows = await db.execute("SELECT count(*) AS n FROM users");
+	return { statusCode: 200, body: JSON.stringify(rows.rows[0]) };
+};
+```
+
+The Lambda Node 20+ runtime has `fetch` natively, which is all
+`@libsql/client` needs.
+
+## Vercel / Next.js
+
+```ts
+// app/api/users/route.ts
+import { createClient } from "@libsql/client";
+
+const db = createClient({
+	url: process.env.LIBSQL_URL!,
+	authToken: process.env.LIBSQL_AUTH_TOKEN!,
+});
+
+export async function GET() {
+	const rows = await db.execute("SELECT id, name FROM users LIMIT 10");
+	return Response.json(rows.rows);
+}
+```
+
+## FastAPI
+
+```python
+from libsql_client import create_client
+from fastapi import FastAPI
+import os
+
+app = FastAPI()
+db = create_client(
+	url=os.environ["LIBSQL_URL"],
+	auth_token=os.environ["LIBSQL_AUTH_TOKEN"],
+)
+
+@app.get("/users")
+async def users():
+	rs = await db.execute("SELECT id, name FROM users LIMIT 10")
+	return [dict(zip(rs.columns, row)) for row in rs.rows]
+```
+
+## Common errors
+
+| Message | Cause |
+|---|---|
+| `fetch failed` | Bad URL or sqld not running |
+| `Hrana: failed to authenticate` | JWT signed by a different keypair |
+| `libsql server: not found` | Pass the URL **with** the `libsql://` or `https://` scheme |
+| `connect ETIMEDOUT` | Tunnel down, or quick tunnel hostname rotated since you copied it |

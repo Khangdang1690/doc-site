@@ -1,40 +1,55 @@
 ---
-title: Welcome to Starlight
-description: Get started building your docs site with Starlight.
-template: splash # Remove or comment out this line to display the site sidebar on this page.
+title: sqlitedeploy
+description: Deploy SQLite as a real database. sqld + your own object storage, free-tier friendly.
+template: splash
 hero:
-  tagline: Congrats on setting up a new Starlight project!
-  image:
-    file: ../../assets/houston.webp
+  tagline: Turso-style SQLite, but you bring your own cloud bucket.
   actions:
-    - text: Example Guide
-      link: /guides/example/
+    - text: Quickstart
+      link: /guides/quickstart/
       icon: right-arrow
-    - text: Read the Starlight docs
-      link: https://starlight.astro.build
+    - text: GitHub
+      link: https://github.com/Khangdang1690/sqlitedeploy
       icon: external
       variant: minimal
 ---
 
 import { Card, CardGrid } from '@astrojs/starlight/components';
 
-## Next steps
+`sqlitedeploy` is an open-source CLI that turns SQLite into a distributed
+database for edge and serverless apps. It bundles
+[`sqld`](https://github.com/tursodatabase/libsql) (the libSQL server,
+MIT-licensed), replicates the WAL to **your own** S3-compatible bucket via
+`bottomless`, and opens a public HTTPS endpoint over Cloudflare Tunnel — no
+domain, no port-forward, no SaaS subscription.
 
-<CardGrid stagger>
-	<Card title="Update content" icon="pencil">
-		Edit `src/content/docs/index.mdx` to see this page change.
+This very documentation site is powered by sqlitedeploy: the search box
+above queries an FTS5 index inside a sqld instance running on Oracle
+Cloud's Always Free tier.
+
+<CardGrid>
+	<Card title="One command to live" icon="rocket">
+		`sqlitedeploy up` provisions storage, generates JWT keys, starts sqld,
+		and prints a `libsql://` URL your app can connect to.
 	</Card>
-	<Card title="Change page layout" icon="document">
-		Delete `template: splash` in `src/content/docs/index.mdx` to display a
-		sidebar on this page.
+	<Card title="Your bucket, your bytes" icon="cloud-download">
+		WAL replicates to Cloudflare R2, Backblaze B2, or any S3-compatible
+		store. Free tiers cover 10 GB. Zero vendor lock-in.
 	</Card>
-	<Card title="Add new content" icon="add-document">
-		Add Markdown or MDX files to `src/content/docs` to create new pages.
+	<Card title="Edge-ready" icon="setting">
+		Cloudflare Workers, AWS Lambda, Vercel — anything that speaks HTTP can
+		query sqld through `@libsql/client`.
 	</Card>
-	<Card title="Configure your site" icon="setting">
-		Edit your `sidebar` and other config in `astro.config.mjs`.
-	</Card>
-	<Card title="Read the docs" icon="open-book">
-		Learn more in [the Starlight Docs](https://starlight.astro.build/).
+	<Card title="Live read replicas" icon="approve-check">
+		`sqlitedeploy attach` streams WAL frames over gRPC for sub-second
+		freshness. Geo-distribute reads with one command.
 	</Card>
 </CardGrid>
+
+## When NOT to use this
+
+- **You need multi-writer.** SQLite is single-writer at the file level. Use
+  rqlite, LiteFS Cloud, or Turso's managed product.
+- **You need automatic failover.** Recovery is a manual `--sync-from-storage`
+  on a fresh primary.
+- **You're on Windows.** sqld's WAL implementation is POSIX-only. Use WSL2.

@@ -1,0 +1,61 @@
+---
+title: Local dev (no cloud)
+description: Run sqld locally with zero signups. Useful for tests and CI.
+---
+
+`sqlitedeploy dev` is the offline cousin of `up`. It:
+
+- Skips provider auth and bucket provisioning entirely.
+- Starts sqld against a local SQLite file (no bottomless, no replication).
+- Skips JWT auth so any client can connect with any token.
+- Listens only on `127.0.0.1`.
+
+```bash
+sqlitedeploy dev
+```
+
+Output:
+
+```
+✓ Local sqld is running.
+
+  URL:        http://127.0.0.1:8080
+  Local file: /home/you/.sqlitedeploy/db/dbs/default/data
+  Auth:       (disabled — dev mode)
+```
+
+## In tests
+
+Set up CI to run `sqlitedeploy dev` in the background:
+
+```yaml
+# GitHub Actions snippet
+- name: Start sqld
+  run: sqlitedeploy dev &
+- name: Wait for sqld
+  run: |
+    for i in {1..30}; do
+      curl -fsS http://127.0.0.1:8080/health && break
+      sleep 1
+    done
+- name: Run integration tests
+  env:
+    LIBSQL_URL: http://127.0.0.1:8080
+  run: pnpm test
+```
+
+## Reset state
+
+By default, `dev` persists the SQLite file between runs. To wipe:
+
+```bash
+sqlitedeploy dev --reset
+```
+
+This removes `.sqlitedeploy/db/` before starting, so you get a clean DB.
+
+## When NOT to use `dev`
+
+- **You want to test bottomless behavior.** Use `up --byo-storage` against
+  a local MinIO instance instead — see [Bring your own storage](/guides/byo-storage/).
+- **You want to test JWT auth in your client.** `dev` disables auth.

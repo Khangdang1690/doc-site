@@ -1,0 +1,36 @@
+# /etc/systemd/system/sqlitedeploy.service
+#
+# Runs the sqlitedeploy primary as the unprivileged `sqld` user.
+# After enabling: `sudo systemctl enable --now sqlitedeploy`.
+
+[Unit]
+Description=sqlitedeploy primary (sqld + bottomless)
+Documentation=https://docs.sqlitedeploy.dev
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sqld
+Group=sqld
+WorkingDirectory=/home/sqld/db
+ExecStart=/usr/bin/sqlitedeploy up --no-tunnel
+Restart=on-failure
+RestartSec=5
+
+# Sandboxing — sqld only needs its own home dir.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/sqld/db /home/sqld/.config /home/sqld/.cache
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true
+RestrictRealtime=true
+
+[Install]
+WantedBy=multi-user.target

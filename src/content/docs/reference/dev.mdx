@@ -1,0 +1,39 @@
+---
+title: sqlitedeploy dev
+description: Run sqld locally without any cloud, auth, or bucket.
+---
+
+```
+sqlitedeploy dev [flags]
+```
+
+Zero-signup local sqld. Skips auth, skips bucket provisioning, listens
+only on localhost. The SQLite file persists between runs.
+
+## Flags
+
+| Flag | Default | Description |
+|---|---|---|
+| `--http-listen-addr` | `127.0.0.1:8080` | Where sqld serves Hrana HTTP |
+| `--reset` | `false` | Wipe `.sqlitedeploy/db/` before starting |
+| `-C, --project-dir` | cwd | Project directory |
+
+## Examples
+
+```bash
+# Daily local dev.
+sqlitedeploy dev
+
+# Clean slate.
+sqlitedeploy dev --reset
+
+# Different port (e.g. when you have multiple projects open).
+sqlitedeploy dev --http-listen-addr 127.0.0.1:8181
+```
+
+## Notes
+
+- Auth is **disabled** in dev mode. Any token (or no token) works.
+- Bottomless replication is **off**. The local file is the only copy.
+- Writes from `dev` are NOT compatible with later `up`. If you switch
+  modes, do `sqlitedeploy down` first.

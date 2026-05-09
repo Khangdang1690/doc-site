@@ -1,0 +1,66 @@
+---
+title: Read replicas
+description: Stream WAL frames to other VMs for sub-second-stale reads in other regions.
+---
+
+import { Steps } from '@astrojs/starlight/components';
+
+A read replica is a second sqld process that pulls WAL frames over gRPC
+from the primary. Reads served by the replica are local; the replica
+catches up to the primary in well under a second on a healthy network.
+
+## Setup
+
+<Steps>
+
+1. **On the primary**: confirm gRPC is reachable. By default `up` binds it
+   to `0.0.0.0:5001`, which means any host that can route to your VM can
+   connect. Open the firewall accordingly:
+
+   ```bash
+   sudo ufw allow 5001/tcp comment 'sqld replica gRPC'
+   ```
+
+2. **On the replica VM**, install sqlitedeploy the same way as on the
+   primary, then:
+
+   ```bash
+   sqlitedeploy attach \
+     --primary-grpc-url http://primary.example.com:5001 \
+     --auth-jwt-key-file ./jwt_public.pem \
+     --replica-token "$(cat ./replica.jwt)"
+   ```
+
+   Where `jwt_public.pem` and `replica.jwt` are copied from the primary's
+   `.sqlitedeploy/auth/` directory.
+
+3. **First run** does a cold-restore from the primary's bucket (so the
+   replica doesn't have to replay every WAL frame from genesis). Subsequent
+   runs resume from the local file.
+
+</Steps>
+
+## Pointing apps at the replica
+
+Replicas serve the same Hrana protocol as the primary on `:8080`. Point
+read-heavy code at the nearest replica's URL and write-heavy code at the
+primary:
+
+```ts
+const primary = createClient({ url: PRIMARY_URL, authToken: TOKEN });
+const replica = createClient({ url: REPLICA_URL, authToken: TOKEN });
+
+await primary.execute("INSERT INTO events VALUES (?, ?)", [id, payload]);
+const rows = await replica.execute("SELECT * FROM events ORDER BY id DESC LIMIT 100");
+```
+
+If you accidentally write to a replica, sqld returns an error — the WAL
+flows one direction only.
+
+## Troubleshooting
+
+| Symptom | Cause |
+|---|---|
+| `connection refused` on `attach` | Primary's gRPC port not reachable; check firewall + `--grpc-listen-addr` |
+| `unauthenticated` | Replica JWT was minted by a different keypair than the primary's `jwt_public.pem` |
+| Slow catchup on first run | Bucket is far from the replica; consider a region-local cache |

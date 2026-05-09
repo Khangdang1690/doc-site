@@ -1,0 +1,37 @@
+---
+title: sqlitedeploy down
+description: Tear down the local stack. Optionally wipe the bucket too.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+```
+sqlitedeploy down [flags]
+```
+
+Removes the local `.sqlitedeploy/` directory: config, the SQLite file,
+JWT keys, and tunnel state. By default it does NOT touch the remote
+bucket — your WAL frames stay durable.
+
+## Flags
+
+| Flag | Default | Description |
+|---|---|---|
+| `--wipe` | `false` | Also delete the R2 bucket (dangerous; irreversible) |
+| `-C, --project-dir` | cwd | Project directory |
+
+## Examples
+
+```bash
+# Stop and forget. Bucket and durable state remain.
+sqlitedeploy down
+
+# Nuke everything.
+sqlitedeploy down --wipe
+```
+
+<Aside type="danger">
+	`--wipe` deletes the remote bucket. There is no recovery — make sure
+	you have a backup of `jwt_private.pem` if you might want to spin a new
+	primary that issues compatible tokens.
+</Aside>
