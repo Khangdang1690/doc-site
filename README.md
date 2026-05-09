@@ -19,9 +19,10 @@ via bottomless. Everything lives on **Oracle Cloud Always Free**
 | DB | sqld (via `sqlitedeploy up --no-tunnel`) |
 | Search | SQLite FTS5 (`docs_fts` virtual table) |
 | Object storage | Cloudflare R2 (10 GB free, $0 egress) |
-| TLS / proxy | Caddy + Cloudflare Origin Certificate |
-| Edge / CDN | Cloudflare proxy (orange cloud) |
+| Public ingress | Cloudflare Worker on free `*.workers.dev` (no domain needed) |
+| Origin proxy | Caddy on the VM (plain HTTP + shared-secret check) |
 | Host | Oracle Cloud Always Free Ampere A1 |
+| **Total cost** | **$0/year** — no domain registration |
 
 ## Local dev
 
@@ -46,19 +47,20 @@ pnpm dev
 
 ## Production deploy
 
-See [`deploy/README.md`](./deploy/README.md) for the Oracle Cloud +
-Cloudflare setup walkthrough. tl;dr:
+See [`deploy/README.md`](./deploy/README.md) for the full walkthrough.
+tl;dr:
 
-1. Create a Cloudflare account → register a domain → set DNS to Cloudflare,
-   SSL/TLS to **Full (strict)**, generate an Origin Certificate.
-2. Provision an Oracle Cloud Ampere A1 VM (Ubuntu 22.04 ARM64). Open ports
-   80 + 443 in the VCN security list **and** in iptables.
+1. Create a Cloudflare account (free; no domain required).
+2. Provision an Oracle Cloud Ampere A1 VM (Ubuntu 22.04 ARM64). Open
+   port 80 in the VCN security list **and** in iptables.
 3. SSH in. Install Node, pnpm, Caddy, and `npm i -g sqlitedeploy`.
 4. As the `sqld` user: `sqlitedeploy auth login` then
    `sqlitedeploy up --no-tunnel`. Capture the replica JWT.
-5. Drop in the systemd units, Caddyfile, and Origin Certificate from
-   `deploy/`. `systemctl enable --now sqlitedeploy docs-site caddy`.
-6. Run `deploy/deploy.sh` to build + reindex + start.
+5. Generate a shared secret (`openssl rand -hex 32`). Paste it into the
+   Caddyfile on the VM **and** into the Worker via `wrangler secret put`.
+6. Run `deploy/deploy.sh` to build + reindex + start the docs server.
+7. From your workstation: `cd worker && pnpm deploy` to publish the
+   public Worker. Wrangler prints your `*.workers.dev` URL.
 
 ## Project layout
 
@@ -84,6 +86,10 @@ docs-site/
 │   └── systemd/
 │       ├── sqlitedeploy.service
 │       └── docs-site.service
+├── worker/                       # Cloudflare Worker proxy (public ingress)
+│   ├── src/index.ts
+│   ├── wrangler.toml
+│   └── README.md
 └── package.json
 ```
 
@@ -117,9 +123,11 @@ docs-site/
   └─────────────────────────────────────┘
 ```
 
-The build inserts; sqld (running on the same VM) serves reads. The user
-sees a search box that talks to `/api/search`, which Caddy proxies to
-Astro on `127.0.0.1:4321`, which queries sqld on `127.0.0.1:8080`.
+The build inserts; sqld (running on the same VM) serves reads. A user's
+browser hits `https://sqlitedeploy-docs.<account>.workers.dev/api/search`;
+the Worker proxies it as plain HTTP to the VM's port 80 (with a
+shared-secret header); Caddy validates the secret and forwards to Astro
+on `127.0.0.1:4321`, which queries sqld on `127.0.0.1:8080`.
 
 ## License
 

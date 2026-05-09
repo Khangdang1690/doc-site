@@ -1,22 +1,28 @@
 # /etc/caddy/Caddyfile
 #
-# Replace `docs.sqlitedeploy.dev` with your real hostname before installing.
-# This config assumes a Cloudflare Origin Certificate is at
-# /etc/caddy/certs/origin.{pem,key} and SSL/TLS mode in the Cloudflare
-# dashboard is set to Full (strict).
+# This config assumes the public ingress is a Cloudflare Worker on
+# *.workers.dev (see ../worker/), so the VM only needs plain HTTP on
+# port 80. Caddy's job here is gzip + access logs + bouncing requests
+# that didn't come through the Worker.
+#
+# Replace WORKER_SECRET_HERE with the value you set via
+# `wrangler secret put WORKER_SECRET`. They MUST match.
 
-docs.sqlitedeploy.dev {
-	tls /etc/caddy/certs/origin.pem /etc/caddy/certs/origin.key
+:80 {
+	# Reject anything missing the shared secret. This makes
+	# `curl http://<vm-ip>` from outside Cloudflare 401 out.
+	@unauthorized not header X-Worker-Secret WORKER_SECRET_HERE
+	respond @unauthorized "Forbidden" 401
+
 	encode zstd gzip
 
-	# Astro's Node SSR adapter listens here (see /etc/systemd/system/docs-site.service).
+	# Astro Node SSR is on the loopback.
 	reverse_proxy 127.0.0.1:4321 {
-		# Pass through Cloudflare's true-client headers if you ever turn the
-		# orange cloud off and want real client IPs in the Astro logs.
+		# The Worker already adds X-Forwarded-Host / X-Forwarded-Proto;
+		# keep the real client IP so Astro logs show CF-Connecting-IP.
 		header_up X-Real-IP {http.request.header.CF-Connecting-IP}
 	}
 
-	# Static asset cache. Astro fingerprints filenames so this is safe.
 	@astro_assets path /_astro/*
 	header @astro_assets Cache-Control "public, max-age=31536000, immutable"
 
