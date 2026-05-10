@@ -25,10 +25,10 @@ flowchart LR
         clientA -- "reads (µs)" --> embedA
     end
 
-    subgraph appB["App instance B"]
-        clientB["libSQL client"]
-        embedB[("Embedded SQLite<br/>local.db")]
-        clientB -- "reads (µs)" --> embedB
+    subgraph appN["App instance N"]
+        clientN["libSQL client"]
+        embedN[("Embedded SQLite<br/>local.db")]
+        clientN -- "reads (µs)" --> embedN
     end
 
     subgraph cloud["Your cloud (compute + storage)"]
@@ -41,9 +41,9 @@ flowchart LR
     bucket[("Object storage<br/>S3 / R2 / GCS / Azure Blob /<br/>B2 / Tigris / MinIO / …")]
 
     clientA -- "writes (Hrana / HTTPS)" --> master
-    clientB -- "writes (Hrana / HTTPS)" --> master
+    clientN -- "writes (Hrana / HTTPS)" --> master
     master -- "WAL frames (gRPC sync)" --> clientA
-    master -- "WAL frames (gRPC sync)" --> clientB
+    master -- "WAL frames (gRPC sync)" --> clientN
     bottomless -- "async WAL frames" --> bucket
 ```
 
