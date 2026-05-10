@@ -1,6 +1,6 @@
 ---
 title: How it works
-description: The pieces sqlitedeploy stitches together — sqld, bottomless, JWT auth, and Cloudflare Tunnel.
+description: The pieces sqlitedeploy stitches together — sqld, bottomless, JWT auth, and pluggable public ingress.
 ---
 
 import { Aside } from '@astrojs/starlight/components';
@@ -16,9 +16,12 @@ a single CLI that's friendly to free tiers.
               │                       │                            │
               └───────── Hrana over HTTPS ──────────────┐          │
                                                         ▼          │
-                                            Cloudflare Tunnel  ←───┘
-                                                        │
-                                                        ▼
+                       Public ingress  ──────────────────────────  │
+                       (one of):                          │        │
+                         • Cloudflare quick tunnel        │        │
+                         • Fly / Render / Cloud Run TLS   │ ←──────┘
+                         • your own reverse proxy         │
+                                                          ▼
                             ┌──────────────────────────────────────┐
                             │  Primary host                         │
                             │  ────────────                         │
@@ -27,7 +30,8 @@ a single CLI that's friendly to free tiers.
                             │   │                                   │
                             │   ▼                                   │
                             │  bottomless ──── async WAL frames ────┼──▶ S3-compatible bucket
-                            │                                       │     (R2 / B2 / S3 / MinIO)
+                            │                                       │   (R2 / S3 / B2 / Tigris /
+                            │                                       │    Wasabi / MinIO / Spaces)
                             └──────────────────────────────────────┘
 ```
 
@@ -66,15 +70,26 @@ Every connection to sqld is gated by an Ed25519-signed JWT. The CLI:
 
 If you lose the private key, you can't mint new tokens — back it up.
 
-### Cloudflare Tunnel
+### Public ingress
 
-To skip the "buy a domain, configure DNS, terminate TLS" yak-shave for
-people just trying things out, `up` shells out to `cloudflared` and opens
-a free **quick tunnel**. You get a `https://random.trycloudflare.com` URL
-pointed at your local sqld.
+`sqlitedeploy` separates "where sqld runs" from "how clients reach it."
+Two modes ship today, picked with `--ingress`:
 
-The hostname rotates on each run. For a stable production endpoint, pass
-[`--no-tunnel`](/guides/byo-storage/) and run your own reverse proxy.
+- **`--ingress=tunnel`** (default). Skips the "buy a domain, configure DNS,
+  terminate TLS" yak-shave: `up` shells out to `cloudflared` and opens a
+  free **quick tunnel**. You get a `https://random.trycloudflare.com` URL
+  pointed at sqld. Works anywhere with outbound HTTPS — laptop, home
+  server, container with no public IP. The hostname rotates on each run.
+- **`--ingress=listen`**. sqld binds a public port and your platform's
+  existing HTTPS handles the public URL — Fly auto-TLS, Render's
+  `*.onrender.com`, Railway, Cloud Run, ECS+ALB, your own Caddy/nginx.
+  `sqlitedeploy` provisions nothing on the ingress side. Pair with
+  `--public-url=https://your-domain.example` so the success banner shows
+  the URL clients will actually use. See
+  [Deploy](/guides/deploy/) for per-platform recipes.
+
+The two modes are independent of the storage choice — pick any combination
+of `--provider` and `--ingress`.
 
 ## What `up` actually does
 
@@ -99,9 +114,10 @@ Under the hood, `sqlitedeploy up` runs roughly this sequence
   wait for :8080 to accept TCP
     └── timeout 15s
 
-  if not --no-tunnel:
-    └── shell out to `cloudflared tunnel --url http://127.0.0.1:8080`
-    └── parse public URL from stdout
+  start ingress driver:
+    └── --ingress=tunnel: shell out to `cloudflared tunnel --url http://127.0.0.1:8080`,
+                         parse public URL from stdout
+    └── --ingress=listen: noop — your platform's ingress is already in front
 
   print summary, hand off to user (Ctrl-C to stop)
 ```

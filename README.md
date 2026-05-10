@@ -17,7 +17,7 @@ via bottomless. Everything runs as a single **Fly.io** Machine.
 |---|---|
 | Framework | Astro 6 + Starlight 0.39 |
 | Runtime | Node 22 (Astro `@astrojs/node` standalone) |
-| DB | sqld (via `sqlitedeploy up --byo-storage --no-tunnel`) |
+| DB | sqld (via `sqlitedeploy up --byo-storage --ingress=listen`) |
 | Search | SQLite FTS5 (`docs_fts` virtual table) |
 | Object storage | Cloudflare R2 (10 GB free, $0 egress) |
 | Host | Fly.io shared-cpu-1x, 256 MB RAM |

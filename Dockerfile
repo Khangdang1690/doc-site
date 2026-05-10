@@ -33,7 +33,7 @@ FROM ghcr.io/tursodatabase/libsql-server:v0.24.32 AS sqld-image
 #   fly deploy --build-arg SQLITEDEPLOY_REF=main
 # to deploy off the upstream main between releases.
 FROM golang:1.25-bookworm AS sqlitedeploy-builder
-ARG SQLITEDEPLOY_REF=v0.5.1
+ARG SQLITEDEPLOY_REF=v0.6.0
 RUN apt-get update && \
     apt-get install -y --no-install-recommends git ca-certificates && \
     rm -rf /var/lib/apt/lists/*

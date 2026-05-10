@@ -1,13 +1,22 @@
 ---
 title: Bring your own storage
-description: Use Backblaze B2, AWS S3, MinIO, or any S3-compatible store instead of the managed R2 flow.
+description: Use AWS S3, Backblaze B2, MinIO, Tigris, Wasabi, DigitalOcean Spaces, or any S3-compatible store instead of the managed R2 flow.
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
-The default `sqlitedeploy up` provisions a Cloudflare R2 bucket for you.
-If you'd rather use a bucket you already manage — including non-Cloudflare
-ones — pass `--byo-storage` and supply credentials directly.
+`sqlitedeploy` is **multi-cloud at the storage layer**. The `s3` provider
+talks plain S3 API, so it works with anything that speaks S3:
+
+- **AWS S3** (and any AWS-region-compatible alternative)
+- **Backblaze B2**
+- **Cloudflare R2** (BYO token mode, if you'd rather not use the managed flow)
+- **Tigris**, **Wasabi**, **DigitalOcean Spaces**, **Linode Object Storage**, **Scaleway**, **OVHcloud**
+- **MinIO** or any self-hosted S3-compatible service
+
+The default `sqlitedeploy up` provisions a Cloudflare R2 bucket for you —
+that's the only path that ships with managed bucket+token creation today.
+For everything else, pass `--byo-storage` and supply credentials directly.
 
 ## Backblaze B2
 
@@ -29,11 +38,12 @@ sqlitedeploy up \
   --provider s3 \
   --bucket my-app-db \
   --region us-east-1 \
+  --endpoint https://s3.us-east-1.amazonaws.com \
   --access-key $AWS_ACCESS_KEY_ID \
   --secret-key $AWS_SECRET_ACCESS_KEY
 ```
 
-## MinIO / generic S3
+## MinIO / Tigris / Wasabi / DigitalOcean Spaces / generic S3
 
 ```bash
 sqlitedeploy up \
@@ -47,29 +57,39 @@ sqlitedeploy up \
 ```
 
 `--endpoint` is the only S3-specific knob; everything else is the standard
-S3 API.
+S3 API. For hosted services (Tigris, Wasabi, Spaces) replace the endpoint
+with the provider's S3 hostname.
 
-## Skip the public tunnel
+## Pair with your platform's own HTTPS
 
-Pair `--byo-storage` with `--no-tunnel` to keep sqld on localhost. You'll
-need your own reverse proxy + TLS terminator for public access:
+Storage and ingress are **independent decisions**. If you're deploying on
+Fly / Render / Railway / Cloud Run / your own VPS, your platform already
+terminates TLS — pair `--byo-storage` with `--ingress=listen` so sqld
+binds a public port and your platform's edge fronts it. Pass
+`--public-url` so the success banner shows the URL clients will actually
+use:
 
 ```bash
 sqlitedeploy up \
-  --byo-storage --no-tunnel \
+  --byo-storage --ingress=listen --public-url=https://db.example.com \
   --provider s3 --bucket my-db \
   --endpoint $S3_ENDPOINT \
-  --access-key $KEY --secret-key $SECRET \
-  --http-listen-addr 0.0.0.0:8080
+  --access-key $KEY --secret-key $SECRET
 ```
 
-A minimal Caddy config in front:
+In `--ingress=listen` mode, sqld auto-binds `0.0.0.0:8080` so the
+platform's ingress can reach it. Pass `--http-listen-addr` to override.
+
+A minimal Caddy config in front (for users running on a plain VPS):
 
 ```
 db.example.com {
   reverse_proxy 127.0.0.1:8080
 }
 ```
+
+For platform-specific recipes (Fly, Render, Railway, Cloud Run, ECS, k8s,
+VPS), see [Deploy](/guides/deploy/).
 
 ## Credentials via environment
 
@@ -81,6 +101,9 @@ export SQLITEDEPLOY_ACCESS_KEY=…
 export SQLITEDEPLOY_SECRET_KEY=…
 sqlitedeploy up --byo-storage --provider s3 --bucket my-db --region us-east-1
 ```
+
+`SQLITEDEPLOY_INGRESS` and `SQLITEDEPLOY_PUBLIC_URL` are also recognised —
+useful for `entry.sh`-style container scripts or systemd unit files.
 
 ## Sharing one bucket across databases
 

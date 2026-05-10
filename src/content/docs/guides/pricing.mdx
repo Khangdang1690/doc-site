@@ -84,13 +84,24 @@ managed-Postgres compute floor.
 | Hetzner CX32 (4 vCPU, 8 GB, 80 GB SSD)   | €6.80/mo                    | [Hetzner Cloud](https://www.hetzner.com/cloud) |
 | Fly shared-cpu-1x, 1 GB RAM              | $5.92/mo                    | [Fly.io pricing](https://fly.io/docs/about/pricing/) |
 | Fly volume (per GB-mo of disk)           | $0.15/GB-mo                 | [Fly.io pricing](https://fly.io/docs/about/pricing/) |
+| Render Standard 0.5 CPU / 512 MB         | $7/mo                       | [Render pricing](https://render.com/pricing) |
 | Cloudflare R2 storage                    | $0.015/GB-mo (10 GB free)   | [R2 pricing](https://developers.cloudflare.com/r2/pricing/) |
 | Cloudflare R2 egress to internet         | **$0**                      | [R2 pricing](https://developers.cloudflare.com/r2/pricing/) |
 | Cloudflare R2 Class A ops (writes)       | $4.50/M (1M free)           | [R2 pricing](https://developers.cloudflare.com/r2/pricing/) |
 | Cloudflare R2 Class B ops (reads)        | $0.36/M (10M free)          | [R2 pricing](https://developers.cloudflare.com/r2/pricing/) |
 | Backblaze B2 storage                     | $6.95/TB-mo (10 GB free)    | [B2 pricing](https://www.backblaze.com/cloud-storage/pricing) |
 | Backblaze B2 egress                      | $0.01/GB after 3× free tier | [B2 pricing](https://www.backblaze.com/cloud-storage/pricing) |
+| AWS S3 Standard storage                  | $0.023/GB-mo                | [S3 pricing](https://aws.amazon.com/s3/pricing/) |
+| AWS S3 egress to internet                | $0.09/GB after 100 GB free  | [S3 pricing](https://aws.amazon.com/s3/pricing/) |
+| AWS S3 PUT/POST (Class A) requests       | $0.005/1k                   | [S3 pricing](https://aws.amazon.com/s3/pricing/) |
+| AWS S3 GET (Class B) requests            | $0.0004/1k                  | [S3 pricing](https://aws.amazon.com/s3/pricing/) |
+| Tigris storage                           | $0.02/GB-mo (5 GB free)     | [Tigris pricing](https://www.tigrisdata.com/pricing/) |
+| Tigris egress                            | **$0**                      | [Tigris pricing](https://www.tigrisdata.com/pricing/) |
+| DigitalOcean Spaces (250 GB inc.)        | $5/mo flat                  | [DO Spaces pricing](https://www.digitalocean.com/pricing/spaces-object-storage) |
 | Cloudflare Tunnel (quick tunnel)         | $0                          | (TryCloudflare) |
+| Platform-native ingress (Fly/Render/etc.)| $0 (already paid for in compute) | — |
+
+> **Why R2 still wins for backup-restore.** Bottomless does occasional full-DB cold-restores that read every WAL frame from the bucket. On AWS S3, that egress (after the 100 GB free tier) is $0.09/GB; on R2 / Tigris / DigitalOcean Spaces, it's free. For databases >10 GB or frequent disaster-recovery drills, the egress savings dominate the storage savings.
 
 ### AWS RDS PostgreSQL
 

@@ -23,12 +23,15 @@ cd /data
 
 # Spawn sqld (via sqlitedeploy) in the background.
 # --byo-storage skips the managed-R2 OAuth flow (we have raw creds).
-# --no-tunnel keeps sqld on loopback (Fly's edge fronts our public port).
+# --ingress=listen keeps sqld on loopback (Fly's edge fronts our public port).
+# We pin --http-listen-addr to 127.0.0.1 explicitly so listen mode doesn't
+# auto-promote to 0.0.0.0 — Astro on the same machine talks to sqld over
+# loopback only, never the public NIC.
 SQLITEDEPLOY_ACCESS_KEY="$R2_ACCESS_KEY" \
 SQLITEDEPLOY_SECRET_KEY="$R2_SECRET_KEY" \
 sqlitedeploy up \
     --byo-storage \
-    --no-tunnel \
+    --ingress=listen \
     --provider r2 \
     --bucket "$CF_R2_BUCKET" \
     --account-id "$CF_ACCOUNT_ID" \

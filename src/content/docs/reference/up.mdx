@@ -1,6 +1,6 @@
 ---
 title: sqlitedeploy up
-description: Provision storage, start sqld, and open a public Cloudflare Tunnel.
+description: Provision storage, start sqld, and expose a public endpoint via Cloudflare Tunnel or your platform's own ingress.
 ---
 
 The headline command. First run provisions storage and writes
@@ -14,19 +14,24 @@ sqlitedeploy up [flags]
 
 | Flag | Default | Description |
 |---|---|---|
-| `--provider` | `r2` | Storage backend: `r2` \| `b2` \| `s3` |
+| `--provider` | `r2` | Storage backend: `r2` \| `b2` \| `s3` (any S3-compatible service) |
 | `--bucket` | derived | Bucket name (managed mode: optional, auto-derived from project dir) |
 | `--account-id` | | Cloudflare R2 account ID (manual mode only) |
 | `--region` | | Bucket region (B2/S3) |
-| `--endpoint` | | S3 endpoint override (S3 only; e.g. for MinIO) |
+| `--endpoint` | | S3 endpoint override (S3 only; e.g. for MinIO, B2, Tigris) |
 | `--access-key` | env `SQLITEDEPLOY_ACCESS_KEY` | Access key — supplying this triggers manual mode |
 | `--secret-key` | env `SQLITEDEPLOY_SECRET_KEY` | Secret key |
 | `--bucket-prefix` | `db` | Bottomless prefix within the bucket (lets multiple databases share one bucket) |
-| `--http-listen-addr` | `127.0.0.1:8080` | Where sqld serves Hrana-over-HTTP locally |
+| `--http-listen-addr` | `127.0.0.1:8080` (or `0.0.0.0:8080` in listen mode) | Where sqld serves Hrana-over-HTTP |
 | `--grpc-listen-addr` | `0.0.0.0:5001` | Where sqld serves gRPC for replica nodes |
-| `--no-tunnel` | `false` | Skip the Cloudflare Tunnel; expose only locally |
+| `--ingress` | `tunnel` | Public-URL strategy: `tunnel` (Cloudflare quick tunnel, $0, anywhere) \| `listen` (bind a port, your platform's HTTPS handles ingress) |
+| `--public-url` | env `SQLITEDEPLOY_PUBLIC_URL` | Public HTTPS URL clients should use (listen mode only — e.g. `https://db.example.com` or your Fly/Render auto-domain) |
 | `--byo-storage` | `false` | Skip the managed R2 flow; use `--access-key` / `--secret-key` |
 | `-C, --project-dir` | cwd | Project directory |
+
+> `--no-tunnel` is still accepted as a deprecated alias for `--ingress=listen` and prints a one-line warning; new code should use `--ingress=listen` directly.
+
+> In `--ingress=listen` mode, `sqlitedeploy` auto-binds sqld on `0.0.0.0:8080` (instead of the loopback default) so your platform's ingress can reach it. Pass `--http-listen-addr` to override if you want a different port or you're routing over loopback to a sidecar (e.g. Astro on the same Fly Machine).
 
 ## Examples
 
@@ -34,16 +39,25 @@ sqlitedeploy up [flags]
 # The blessed path: managed R2 + quick tunnel.
 sqlitedeploy up
 
-# Self-hosted: own bucket, own reverse proxy.
+# Self-hosted on Fly/Render/Cloud Run/VPS — your platform's HTTPS, your bucket.
 sqlitedeploy up \
-  --byo-storage --no-tunnel \
+  --byo-storage --ingress=listen --public-url=https://db.example.com \
   --provider s3 --bucket my-db --region us-east-1 \
-  --http-listen-addr 0.0.0.0:8080
+  --endpoint https://s3.us-east-1.amazonaws.com
 
 # Two projects sharing one R2 bucket.
 sqlitedeploy up --bucket-prefix billing
 sqlitedeploy up --bucket-prefix orders -C ../orders
 ```
+
+## Environment variables
+
+| Variable | Equivalent flag |
+|---|---|
+| `SQLITEDEPLOY_ACCESS_KEY` | `--access-key` |
+| `SQLITEDEPLOY_SECRET_KEY` | `--secret-key` |
+| `SQLITEDEPLOY_INGRESS` | `--ingress` |
+| `SQLITEDEPLOY_PUBLIC_URL` | `--public-url` |
 
 ## What it writes
 
@@ -57,6 +71,7 @@ sqlitedeploy up --bucket-prefix orders -C ../orders
 
 ## See also
 
+- [Deploy on Fly / Render / Cloud Run / VPS](/guides/deploy/) — recipes per platform
+- [Bring your own storage](/guides/byo-storage/) — non-R2 buckets
 - [`sqlitedeploy down`](/reference/down/) — teardown
 - [`sqlitedeploy attach`](/reference/attach/) — set up a read replica
-- [Bring your own storage](/guides/byo-storage/) — non-R2 setups

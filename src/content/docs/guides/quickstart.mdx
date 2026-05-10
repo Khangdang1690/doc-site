@@ -103,8 +103,9 @@ to Cloudflare R2 — all on free tiers.
 ## Next
 
 - For a stable hostname instead of `*.trycloudflare.com`, run with
-  [`--no-tunnel`](/guides/byo-storage/) and front sqld with your own
-  reverse proxy.
+  [`--ingress=listen`](/guides/deploy/) and let your platform (Fly,
+  Render, Railway, Cloud Run, your own VPS) handle HTTPS — see the
+  [Deploy](/guides/deploy/) guide for per-platform recipes.
 - To replicate reads to other regions, see [Read replicas](/guides/replicas/).
 - To call sqld from Cloudflare Workers, see
   [Connecting from edge runtimes](/guides/edge-clients/).

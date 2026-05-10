@@ -55,6 +55,7 @@ export default defineConfig({
 					items: [
 						{ label: 'Local dev (no cloud)', slug: 'guides/local-dev' },
 						{ label: 'Bring your own storage', slug: 'guides/byo-storage' },
+						{ label: 'Deploy on any cloud', slug: 'guides/deploy' },
 						{ label: 'Read replicas', slug: 'guides/replicas' },
 						{ label: 'Connecting from edge runtimes', slug: 'guides/edge-clients' },
 						{ label: 'Benchmarks', slug: 'guides/benchmarks' },

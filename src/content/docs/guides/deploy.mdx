@@ -1,0 +1,298 @@
+---
+title: Deploy on any cloud
+description: Per-platform recipes for Fly, Render, Railway, Cloud Run, ECS, Kubernetes, and your own VPS — using --ingress=listen so the platform's HTTPS handles the public URL.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+`sqlitedeploy` separates two decisions: where your **bucket** lives
+(durable backup) and how clients reach the **primary** (public URL).
+This guide is the second half — running the primary on a real cloud
+platform with the platform's own HTTPS instead of the default Cloudflare
+quick tunnel.
+
+For the bucket side, see [Bring your own storage](/guides/byo-storage/).
+
+## The pattern
+
+Every platform recipe has the same shape:
+
+```bash
+sqlitedeploy up \
+  --byo-storage --provider=<r2|s3|b2> \
+  --bucket=… --access-key=… --secret-key=… \
+  --ingress=listen --public-url=https://<your-platform-domain>
+```
+
+`--ingress=listen` tells `sqlitedeploy` to bind sqld on `0.0.0.0:8080`
+and let the platform's existing HTTPS terminator route traffic — Fly
+auto-TLS, Render's `*.onrender.com`, your own Caddy, anything. Pass
+`--public-url` so the success banner shows clients the URL they should
+actually use.
+
+<Aside type="note">
+	Every recipe below assumes a **persistent volume** mounted where
+	`.sqlitedeploy/` lives — sqld's SQLite file + WAL must survive
+	container restarts. Without a volume, every redeploy is a cold-restore
+	from your bucket (which works, but takes seconds-to-minutes depending
+	on DB size).
+</Aside>
+
+## Fly.io
+
+Fly auto-TLSes the `*.fly.dev` domain for you. You bring a volume.
+
+`fly.toml`:
+
+```toml
+app = "my-db"
+primary_region = "iad"
+
+[mounts]
+  source = "data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+```
+
+`Dockerfile`:
+
+```dockerfile
+FROM node:20-bookworm-slim
+RUN apt-get update && apt-get install -y curl ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN npm i -g sqlitedeploy
+WORKDIR /data
+ENTRYPOINT ["sh", "-c", "exec sqlitedeploy up \
+  --byo-storage --provider=r2 \
+  --bucket=$CF_R2_BUCKET --account-id=$CF_ACCOUNT_ID \
+  --access-key=$R2_ACCESS_KEY --secret-key=$R2_SECRET_KEY \
+  --ingress=listen --public-url=https://$FLY_APP_NAME.fly.dev"]
+```
+
+Set secrets:
+
+```bash
+fly volumes create data --size 1 --region iad
+fly secrets set R2_ACCESS_KEY=… R2_SECRET_KEY=… CF_ACCOUNT_ID=… CF_R2_BUCKET=…
+fly deploy
+```
+
+If you're attaching read replicas, expose port `5001` (gRPC) too — add a
+second `[[services]]` block with `internal_port = 5001` and protocol
+`tcp`.
+
+## Render
+
+Render gives you a `*.onrender.com` domain with auto-HTTPS and an
+optional persistent disk on Standard or higher.
+
+Service settings:
+- **Type**: Web Service (Docker)
+- **Disk**: Mount at `/data`, 1 GB
+- **Health Check Path**: `/health`
+
+Start command:
+
+```bash
+sqlitedeploy up \
+  --byo-storage --provider=r2 \
+  --bucket=$CF_R2_BUCKET --account-id=$CF_ACCOUNT_ID \
+  --access-key=$R2_ACCESS_KEY --secret-key=$R2_SECRET_KEY \
+  --ingress=listen --public-url=https://$RENDER_EXTERNAL_HOSTNAME \
+  -C /data
+```
+
+`-C /data` points sqlitedeploy at the persistent disk. Render's
+`RENDER_EXTERNAL_HOSTNAME` env var is set automatically.
+
+## Railway
+
+Railway also exposes `RAILWAY_PUBLIC_DOMAIN` automatically and gives you
+a volume on Pro plans.
+
+```bash
+sqlitedeploy up \
+  --byo-storage --provider=s3 \
+  --endpoint=https://s3.us-east-1.amazonaws.com --region=us-east-1 \
+  --bucket=$BUCKET --access-key=$AWS_KEY --secret-key=$AWS_SECRET \
+  --ingress=listen --public-url=https://$RAILWAY_PUBLIC_DOMAIN \
+  -C /data
+```
+
+Mount your Railway volume at `/data` in the service settings.
+
+## Google Cloud Run
+
+Cloud Run auto-TLSes a `*.run.app` URL. The catch: Cloud Run doesn't
+support persistent disks in the same way as Fly/Render — the supported
+patterns are GCS FUSE mounts (slow for SQLite) or **second-generation
+Cloud Run with multi-region Filestore**. For most deployments it's
+simpler to use Cloud Run **Jobs** with a [persistent volume mount](https://cloud.google.com/run/docs/configuring/services/network-filesystems-mounts)
+or to back the primary onto a Compute Engine VM with `cloudflared` /
+your own LB instead.
+
+If you do run on Cloud Run with Filestore mounted at `/data`:
+
+```bash
+sqlitedeploy up \
+  --byo-storage --provider=s3 \
+  --endpoint=https://storage.googleapis.com --region=auto \
+  --bucket=$GCS_BUCKET \
+  --access-key=$HMAC_ACCESS_ID --secret-key=$HMAC_SECRET \
+  --ingress=listen --public-url=https://$K_SERVICE.$K_REVISION.run.app \
+  -C /data
+```
+
+Use [GCS HMAC keys](https://cloud.google.com/storage/docs/authentication/hmackeys)
+for `--access-key` / `--secret-key` so the S3-compatible client works
+against GCS.
+
+## AWS ECS / Fargate
+
+Use an Application Load Balancer for HTTPS termination and EFS for
+persistence (Fargate doesn't have block storage; EFS is the supported
+persistent-volume option).
+
+Task definition essentials:
+- Image with `sqlitedeploy` installed (or use the upstream `Dockerfile`).
+- EFS volume mounted at `/data`, with `Encrypted = true`.
+- Container port `8080` exposed to the ALB target group.
+- Container env: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` from
+  Secrets Manager (or use a task IAM role + a wrapper that exports the
+  STS creds — `sqlitedeploy` doesn't speak AssumeRole directly yet).
+
+Container command:
+
+```bash
+sqlitedeploy up \
+  --byo-storage --provider=s3 \
+  --endpoint=https://s3.us-east-1.amazonaws.com --region=us-east-1 \
+  --bucket=$BUCKET \
+  --access-key=$AWS_ACCESS_KEY_ID --secret-key=$AWS_SECRET_ACCESS_KEY \
+  --ingress=listen --public-url=https://$ALB_DNS_NAME \
+  -C /data
+```
+
+For replicas, add a second target group on the ALB → port `5001` (or use
+a Network Load Balancer for raw TCP).
+
+## Plain VPS (Hetzner / Linode / DigitalOcean Droplet / your own metal)
+
+Run sqlitedeploy as a systemd service, front it with Caddy, get
+auto-TLS for free.
+
+`/etc/systemd/system/sqlitedeploy.service`:
+
+```ini
+[Unit]
+Description=sqlitedeploy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/var/lib/sqlitedeploy
+EnvironmentFile=/etc/sqlitedeploy.env
+ExecStart=/usr/local/bin/sqlitedeploy up \
+  --byo-storage --provider=s3 \
+  --endpoint=${S3_ENDPOINT} --region=${S3_REGION} \
+  --bucket=${S3_BUCKET} \
+  --access-key=${SQLITEDEPLOY_ACCESS_KEY} --secret-key=${SQLITEDEPLOY_SECRET_KEY} \
+  --ingress=listen --public-url=https://db.example.com
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+```
+
+`/etc/sqlitedeploy.env` (mode 0600, owned by the service user):
+
+```
+SQLITEDEPLOY_ACCESS_KEY=…
+SQLITEDEPLOY_SECRET_KEY=…
+S3_ENDPOINT=https://s3.us-east-1.amazonaws.com
+S3_REGION=us-east-1
+S3_BUCKET=my-db
+```
+
+`/etc/caddy/Caddyfile`:
+
+```
+db.example.com {
+  reverse_proxy 127.0.0.1:8080
+}
+```
+
+Caddy handles the cert ACME dance automatically. For replicas, add an
+L4 entry (Caddy `layer4` plugin or HAProxy / nginx-stream) on port 5001.
+
+## Kubernetes
+
+Treat the primary as a **single-replica StatefulSet** with a PVC. Single
+replica because sqld is single-writer at the file level — never scale up.
+
+```yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: { name: sqlitedeploy }
+spec:
+  replicas: 1   # MUST stay 1 — sqld is single-writer
+  serviceName: sqlitedeploy
+  selector: { matchLabels: { app: sqlitedeploy } }
+  template:
+    metadata: { labels: { app: sqlitedeploy } }
+    spec:
+      containers:
+        - name: sqlitedeploy
+          image: ghcr.io/khangdang1690/sqlitedeploy:latest
+          args:
+            - up
+            - --byo-storage
+            - --provider=s3
+            - --endpoint=$(S3_ENDPOINT)
+            - --bucket=$(S3_BUCKET)
+            - --access-key=$(SQLITEDEPLOY_ACCESS_KEY)
+            - --secret-key=$(SQLITEDEPLOY_SECRET_KEY)
+            - --ingress=listen
+            - --public-url=https://db.example.com
+            - -C=/data
+          envFrom:
+            - secretRef: { name: sqlitedeploy-creds }
+          ports:
+            - { name: http, containerPort: 8080 }
+            - { name: grpc, containerPort: 5001 }
+          volumeMounts:
+            - { name: data, mountPath: /data }
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources: { requests: { storage: 10Gi } }
+```
+
+Front it with an `Ingress` (or Gateway API) on port 8080. Ingress
+handles TLS — that's why we pass `--ingress=listen`.
+
+## Common gotchas
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Connections refused on the public URL | sqld bound to `127.0.0.1` instead of `0.0.0.0` | Either pass `--ingress=listen` (auto-promotes) or set `--http-listen-addr=0.0.0.0:8080` explicitly. |
+| Replicas can't connect to gRPC | Platform routes only HTTPS, not raw TCP | Expose port 5001 separately — Fly: a second `[[services]]`; AWS: NLB; k8s: a TCP `Service`. |
+| Every redeploy is slow | No persistent volume → cold-restore from bucket each time | Mount a persistent volume at the project dir (`-C /data` + volume at `/data`). |
+| Database locked errors after a deploy | Multiple replicas ran in parallel | sqld is single-writer. Set `replicas: 1` on the StatefulSet, `auto_stop_machines = false` on Fly, or equivalent. |
+| The success banner shows `Listening on 0.0.0.0:8080 — point your platform's…` instead of a URL | You forgot `--public-url` | Add `--public-url=https://<your-platform-domain>`. The platform still works; the banner is just nicer with it. |
+
+## See also
+
+- [Bring your own storage](/guides/byo-storage/) — the bucket side of the same equation
+- [`sqlitedeploy up`](/reference/up/) — full flag reference
+- [Read replicas](/guides/replicas/) — attach replicas to a primary you've deployed
