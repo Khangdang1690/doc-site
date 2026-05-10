@@ -40,7 +40,86 @@ actually use.
 
 ## Fly.io
 
-Fly auto-TLSes the `*.fly.dev` domain for you. You bring a volume.
+Two shapes work on Fly. Pick one:
+
+- **App + sqld in one machine (sidecar).** One Fly app, one machine, one
+  bill. The Node app talks to sqld over loopback. Best for hobby
+  projects and tight-budget setups. Walkthrough below uses
+  [`examples/blog`](https://github.com/Khangdang1690/sqlitedeploy/tree/main/examples/blog).
+- **Sqld on its own machine.** App and DB scale independently; clients
+  point `LIBSQL_URL` at the sqld machine's `*.fly.dev`. Recipe further
+  down at [Fly.io: DB-only machine](#flyio-db-only-machine).
+
+### Sidecar walkthrough (deploy the blog example)
+
+#### 1. Set up R2
+
+See [Bring your own storage](/guides/byo-storage/) for the full flow.
+You'll end up with four values: `R2_ACCESS_KEY`, `R2_SECRET_KEY`,
+`CF_ACCOUNT_ID`, `CF_R2_BUCKET`.
+
+#### 2. Clone the example
+
+```bash
+git clone https://github.com/Khangdang1690/sqlitedeploy
+cd sqlitedeploy/examples/blog
+```
+
+The example contains:
+- `Dockerfile` — installs `sqlitedeploy` globally + builds the Hono app
+- `entry.sh` — starts sqld in the background bound to `127.0.0.1:8080`,
+  waits for the JWT bootstrap, then execs the Node app on `:3000`
+- `fly.toml` — single Fly machine, 1 GB volume mounted at `/data`,
+  HTTP health check on `/health`
+
+#### 3. Launch on Fly
+
+```bash
+fly launch --no-deploy        # creates the app, picks a name
+fly volumes create data --size 1 --region iad
+fly secrets set \
+  R2_ACCESS_KEY=…  R2_SECRET_KEY=… \
+  CF_ACCOUNT_ID=…  CF_R2_BUCKET=…
+fly deploy
+```
+
+Open `https://<your-app>.fly.dev`, write a post, then redeploy and
+confirm it persists — that's R2 + the Fly volume both doing their job.
+
+#### How the sidecar shape works
+
+`entry.sh` runs `sqlitedeploy up` in the background with
+`--ingress=listen --http-listen-addr 127.0.0.1:8080`, so sqld is
+loopback-only. It then waits up to 60s for sqld's `/health` to return
+200 *and* `.sqlitedeploy/auth/replica.jwt` to exist on the volume. Once
+both are true it execs the Node app on `:3000`.
+
+Fly's edge proxy points only at `:3000` (per `fly.toml`'s
+`internal_port`). The app talks to sqld over loopback via
+`LIBSQL_URL=http://127.0.0.1:8080`. There's no `--public-url` because
+nothing outside the container talks to sqld directly.
+
+#### Swapping in your own app
+
+To turn the example into your app:
+1. Replace `src/` with your code.
+2. Update `package.json` deps and `npm run build` for your build.
+3. Update `entry.sh`'s last line (`exec node /app/dist/index.js`) to
+   your start command.
+4. Keep `fly.toml`, the `npm i -g sqlitedeploy` line in the Dockerfile,
+   and the background sqld block in `entry.sh` — those are the parts
+   that wire sqlitedeploy in.
+
+If you're attaching read replicas later, expose port `5001` (gRPC) too —
+add a second `[[services]]` block with `internal_port = 5001` and
+protocol `tcp`. (The sidecar shape doesn't need this; only matters
+if external replicas connect.)
+
+### Fly.io: DB-only machine
+
+If you want sqld on its own Fly app and your application running
+elsewhere, skip the sidecar and use this shape — the container *is*
+sqld, exposed publicly on `*.fly.dev`.
 
 `fly.toml`:
 
@@ -85,9 +164,9 @@ fly secrets set R2_ACCESS_KEY=… R2_SECRET_KEY=… CF_ACCOUNT_ID=… CF_R2_BUCK
 fly deploy
 ```
 
-If you're attaching read replicas, expose port `5001` (gRPC) too — add a
-second `[[services]]` block with `internal_port = 5001` and protocol
-`tcp`.
+Clients then point `LIBSQL_URL=https://my-db.fly.dev`. For read
+replicas, expose port `5001` too (second `[[services]]` block,
+protocol `tcp`).
 
 ## Render
 
