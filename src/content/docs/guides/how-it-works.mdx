@@ -14,8 +14,8 @@ Every long-running instance of your application embeds a libSQL client
 backed by a local SQLite file. A single **master** sqld runs on the cloud
 you picked — Fly VM, Cloud Run, ECS, Render, a home server, whatever. The
 master owns the authoritative copy and ships WAL frames to the object
-store you picked. The embedded copies pull those WAL frames continuously
-so each app instance keeps a fresh local replica.
+store you picked. The embedded copies pull those WAL frames on a
+configurable interval so each app instance keeps a recent local replica.
 
 ```mermaid
 flowchart LR
@@ -42,8 +42,8 @@ flowchart LR
 
     clientA -- "writes (Hrana / HTTPS)" --> master
     clientN -- "writes (Hrana / HTTPS)" --> master
-    master -- "WAL frames (gRPC sync)" --> clientA
-    master -- "WAL frames (gRPC sync)" --> clientN
+    master -- "WAL frames (Hrana / HTTPS)" --> clientA
+    master -- "WAL frames (Hrana / HTTPS)" --> clientN
     bottomless -- "async WAL frames" --> bucket
 ```
 
@@ -67,13 +67,17 @@ completes — read-your-writes is preserved on the writing instance.
 
 ### Sync is pull-based WAL replication
 
-Embedded replicas pull WAL frames from the master's gRPC stream
-(port 5001 in the component diagram below), either on an explicit
-`sync()` call or on a configurable `syncInterval`. Because both ends
-speak the same on-disk format, the frames are applied byte-level to the
-local SQLite file — no SQL replay, no logical-to-physical translation,
-no schema drift between replicas. Cross-instance latency is the sync
-interval plus the gRPC round-trip, typically a few hundred milliseconds.
+Embedded replicas pull WAL frames over Hrana on the master's HTTP port
+(:8080 in the component diagram below — the same endpoint they send
+writes to), either on an explicit `sync()` call or on a configurable
+`syncInterval`. Because both ends speak the same on-disk format, the
+frames are applied byte-level to the local SQLite file — no SQL replay,
+no logical-to-physical translation, no schema drift between replicas.
+Cross-instance propagation is bounded by whatever interval the client
+is configured with; tighter intervals mean fresher replicas at the cost
+of more sync traffic. The :5001 gRPC port shown below is a separate
+path used by replica **VMs** running sqld in replica mode, not by
+embedded clients.
 
 ### The cloud-agnostic tweak
 
