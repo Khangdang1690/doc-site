@@ -10,29 +10,35 @@ a single CLI that's friendly to free tiers.
 
 ## The components
 
-```
-        Your app                 Read replicas              Cloudflare Worker /
-        (any HTTP client)        (other VMs)                Lambda / Vercel
-              │                       │                            │
-              └───────── Hrana over HTTPS ──────────────┐          │
-                                                        ▼          │
-                       Public ingress  ──────────────────────────  │
-                       (one of):                          │        │
-                         • Cloudflare quick tunnel        │        │
-                         • Fly / Render / Cloud Run TLS   │ ←──────┘
-                         • your own reverse proxy         │
-                                                          ▼
-                            ┌──────────────────────────────────────┐
-                            │  Primary host                         │
-                            │  ────────────                         │
-                            │  sqld :8080 (Hrana HTTP)              │
-                            │  sqld :5001 (gRPC for replicas) ──────┼──▶ replicas
-                            │   │                                   │
-                            │   ▼                                   │
-                            │  bottomless ──── async WAL frames ────┼──▶ S3-compatible bucket
-                            │                                       │   (R2 / S3 / B2 / Tigris /
-                            │                                       │    Wasabi / MinIO / Spaces)
-                            └──────────────────────────────────────┘
+```mermaid
+flowchart LR
+    app["Your app<br/>(any HTTP client)"]
+    edge["Cloudflare Worker /<br/>Lambda / Vercel"]
+    replicas["Read replicas<br/>(other VMs)"]
+
+    subgraph ingress["Public ingress (pick one)"]
+        direction TB
+        tunnel["Cloudflare quick tunnel"]
+        platform["Fly / Render /<br/>Cloud Run TLS"]
+        proxy["Your own reverse proxy"]
+    end
+
+    subgraph primary["Primary host"]
+        direction TB
+        sqldHttp["sqld :8080<br/>(Hrana HTTP)"]
+        sqldGrpc["sqld :5001<br/>(gRPC for replicas)"]
+        bottomless["bottomless"]
+        sqldHttp -.- sqldGrpc
+        sqldHttp --> bottomless
+    end
+
+    bucket[("S3-compatible bucket<br/>R2 / S3 / B2 / Tigris /<br/>Wasabi / MinIO / Spaces")]
+
+    app -- "Hrana over HTTPS" --> ingress
+    edge -- "Hrana over HTTPS" --> ingress
+    ingress --> sqldHttp
+    sqldGrpc -- "WAL stream" --> replicas
+    bottomless -- "async WAL frames" --> bucket
 ```
 
 ### sqld

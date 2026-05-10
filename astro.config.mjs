@@ -2,6 +2,7 @@
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 import node from '@astrojs/node';
+import mermaid from 'astro-mermaid';
 
 // Static-by-default; the Node adapter lets individual routes opt into SSR
 // via `export const prerender = false`. /api/search uses that to query sqld
@@ -11,6 +12,14 @@ export default defineConfig({
 	output: 'static',
 	adapter: node({ mode: 'standalone' }),
 	integrations: [
+		// Must come BEFORE starlight — astro-mermaid registers a remark plugin
+		// that needs to run before Starlight's markdown pipeline locks in.
+		mermaid({
+			// Picks the same dark/light theme as Starlight (which toggles
+			// data-theme on <html>) so diagrams don't look out of place.
+			autoTheme: true,
+			theme: 'default',
+		}),
 		starlight({
 			title: 'sqlitedeploy',
 			description: 'Deploy SQLite as a real database — sqld + your own object storage, free tier friendly.',

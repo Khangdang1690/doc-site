@@ -33,14 +33,14 @@ verify or update it.
 
 ## Read latency
 
-```
-                 ┌─ µs ─┐ ┌─ ms ─────────────────┐
-embedded SQLite  ████░░
-sqld local       ░░░░██████
-sqld replica     ░░░░░░░░██████████
-RDS intra-AZ     ░░░░░░░░░░░░██████████
-RDS cross-region ░░░░░░░░░░░░░░░░░░░░░░░░░░░██████████████+
-                 0     1ms              10ms              100ms
+p50 read latency by tier — log scale, lower is better:
+
+```mermaid
+xychart-beta horizontal
+    title "Read latency p50 (lower is better)"
+    x-axis ["embedded SQLite", "sqld local", "sqld edge replica", "RDS intra-AZ", "RDS cross-region"]
+    y-axis "ms (log scale)" 0.001 --> 100
+    bar [0.001, 0.5, 3, 1.5, 80]
 ```
 
 - **Embedded SQLite.** With the page cache hot, indexed point reads land
