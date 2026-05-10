@@ -178,6 +178,12 @@ genuinely-idle workloads cost nothing.
 5. **No connection-pooler add-on.** The Hrana protocol is HTTP — Lambdas,
    Workers, and Vercel functions can hammer it without exhausting
    anything. Postgres needs PgBouncer or RDS Proxy ($) to do the same.
+6. **Embedded replicas replace your Redis cache.** Each app instance's
+   local SQLite serves reads at microsecond latency directly from the
+   app process — there's no Redis sitting next to Postgres to make
+   reads fast, no cache-eviction story to manage, no separate billing
+   line. The "Postgres + Redis" reference architecture collapses into
+   one writer + your existing app fleet.
 
 ## Where managed Postgres wins on cost
 
@@ -231,20 +237,46 @@ Cost ratio sqlitedeploy : RDS Multi-AZ ≈ **1 : 10**. The honest counter
 is that RDS Multi-AZ does paid-for things sqlitedeploy doesn't (auto
 failover, point-in-time recovery without thought).
 
-### Read-heavy edge app
+### Read-mostly CRUD app (replacing Postgres + Redis)
 
-10 GB data, 5 read replicas across regions for low-latency reads.
+10 GB data, ~5M queries/month, heavy read-fanout — the canonical
+"Postgres for storage, Redis in front for hot reads" stack.
 
 | Option                                                | Monthly | Notes |
 | ----------------------------------------------------- | ------: | ----- |
-| sqlitedeploy: 1 primary + 5 replica VMs (CX22 each) + R2 | **~€23 (~$25)** | replicas scale linearly in cost and reads |
+| sqlitedeploy on Hetzner CX22 + R2                     | **~€5 (~$6)** | embedded replicas in each app instance serve reads — no separate cache |
+| Render Postgres Starter + Render Redis Starter        | **~$17** | $7 + $10; cheapest managed, no HA, small instances |
+| Supabase Pro + Upstash Pay-as-you-go                  | **~$30** | $25 + ~$5 commands; serverless DX |
+| RDS Multi-AZ db.t4g.small + ElastiCache cache.t4g.micro | **~$70** | $58 + ~$12; the "boring" AWS production stack |
+| Neon Launch (1 CU 24/7) + Upstash                     | **~$82** | scale-to-zero possible but eats cold-start UX |
+
+The architectural point is that the **Redis line disappears**, not that
+Postgres is replaced by something cheaper feature-for-feature. The local
+embedded SQLite plays the role Redis usually plays in this stack: hot
+reads served out of the app's own filesystem, no network hop, no cache
+invalidation logic. You're saving on Postgres *plus* the cache layer
+people usually put in front of it, which is where the gap really opens up.
+
+### Read-heavy edge app
+
+10 GB data, reads served from 5 application instances across regions for
+low-latency local reads.
+
+| Option                                                | Monthly | Notes |
+| ----------------------------------------------------- | ------: | ----- |
+| sqlitedeploy: 1 primary (CX22) + R2, embedded replicas in your 5 app instances | **~€4 (~$5)** | replicas live inside your existing app processes — zero added compute |
+| sqlitedeploy: 1 primary + 5 dedicated replica VMs (CX22 each) + R2 | **~€23 (~$25)** | fallback for stacks without libSQL client bindings; replicas scale linearly in cost and reads |
 | RDS Multi-AZ + 5 cross-region read replicas           | **$200+** | each replica is its own paid instance + cross-region transfer |
 | Aurora Global Database (1 primary + 5 secondaries)    | **$300+** | every secondary bills compute + storage replication |
 | Neon read replicas                                    | **varies** | Neon supports compute branches, billed per CU-hour |
 
-This is where the architecture pays out most: edge reads come out of cheap
-commodity VMs, the writer is unchanged, and there are no per-replica
-managed-service uplifts.
+This is where the architecture pays out most. The default path —
+**embedded replicas inside the app instances you're already running** —
+adds zero compute: reads come out of each app's local SQLite at
+microsecond latency, the writer is unchanged, and managed-service
+per-replica uplifts disappear. The dedicated-replica-VM path is the
+fallback when your runtime can't embed the libSQL client (e.g.,
+languages without bindings).
 
 <Aside type="caution">
 	**What these numbers don't include:**
