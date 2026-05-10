@@ -8,6 +8,89 @@ import { Aside } from '@astrojs/starlight/components';
 `sqlitedeploy` is glue code. It composes four well-tested components into
 a single CLI that's friendly to free tiers.
 
+## Architecture: embedded replica + cloud master
+
+Every long-running instance of your application embeds a libSQL client
+backed by a local SQLite file. A single **master** sqld runs on the cloud
+you picked — Fly VM, Cloud Run, ECS, Render, a home server, whatever. The
+master owns the authoritative copy and ships WAL frames to the object
+store you picked. The embedded copies pull those WAL frames continuously
+so each app instance keeps a fresh local replica.
+
+```mermaid
+flowchart LR
+    subgraph appA["App instance A"]
+        clientA["libSQL client"]
+        embedA[("Embedded SQLite<br/>local.db")]
+        clientA -- "reads (µs)" --> embedA
+    end
+
+    subgraph appB["App instance B"]
+        clientB["libSQL client"]
+        embedB[("Embedded SQLite<br/>local.db")]
+        clientB -- "reads (µs)" --> embedB
+    end
+
+    subgraph cloud["Your cloud (compute + storage)"]
+        direction TB
+        master["Master sqld<br/>(Hrana :8080, gRPC :5001)"]
+        bottomless["bottomless"]
+        master --> bottomless
+    end
+
+    bucket[("Object storage<br/>S3 / R2 / GCS / Azure Blob /<br/>B2 / Tigris / MinIO / …")]
+
+    clientA -- "writes (Hrana / HTTPS)" --> master
+    clientB -- "writes (Hrana / HTTPS)" --> master
+    master -- "WAL frames (gRPC sync)" --> clientA
+    master -- "WAL frames (gRPC sync)" --> clientB
+    bottomless -- "async WAL frames" --> bucket
+```
+
+### Reads stay local
+
+The embedded SQLite is a real `.db` file in the application process.
+Queries are direct syscalls against that file — no network, no driver
+hop, microsecond p99. Read scaling is a property of the application's
+own horizontal scaling: each new instance gets its own embedded replica
+and reads scale linearly with the app fleet.
+
+### Writes go to the master
+
+INSERTs, UPDATEs, and DELETEs are sent over the
+[Hrana protocol](https://github.com/tursodatabase/libsql/blob/main/docs/HRANA_3_SPEC.md)
+to the master sqld. The master executes the write against its own
+SQLite file, hands the WAL frames to bottomless for async durability,
+and acknowledges the client. The initiating client reads its own write
+against the local embedded replica as soon as the sync round-trip
+completes — read-your-writes is preserved on the writing instance.
+
+### Sync is pull-based WAL replication
+
+Embedded replicas pull WAL frames from the master's gRPC stream
+(port 5001 in the component diagram below), either on an explicit
+`sync()` call or on a configurable `syncInterval`. Because both ends
+speak the same on-disk format, the frames are applied byte-level to the
+local SQLite file — no SQL replay, no logical-to-physical translation,
+no schema drift between replicas. Cross-instance latency is the sync
+interval plus the gRPC round-trip, typically a few hundred milliseconds.
+
+### The cloud-agnostic tweak
+
+Turso's bottomless layer is hardwired to AWS S3 and to Turso's hosted
+control plane. `sqlitedeploy` keeps the same WAL-shipping protocol but
+puts a **pluggable storage provider interface** behind it. Today that
+interface speaks any S3-compatible bucket — R2, B2, Tigris, Wasabi,
+MinIO, Spaces — and the abstraction leaves room for native GCS and
+Azure Blob backends without touching sqld or the sync path. "Your
+preferred cloud" composes from two independent choices:
+
+- **Compute** — wherever your master sqld runs.
+- **Storage** — wherever WAL frames land.
+
+Pick any combination. The rest of this page walks through the pieces
+that make that work.
+
 ## The components
 
 ```mermaid
