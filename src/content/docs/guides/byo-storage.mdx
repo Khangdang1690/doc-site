@@ -11,6 +11,7 @@ talks plain S3 API, so it works with anything that speaks S3:
 - **AWS S3** (and any AWS-region-compatible alternative)
 - **Backblaze B2**
 - **Cloudflare R2** (BYO token mode, if you'd rather not use the managed flow)
+- **Azure Blob Storage** (via Microsoft's S3-compatible endpoint)
 - **Tigris**, **Wasabi**, **DigitalOcean Spaces**, **Linode Object Storage**, **Scaleway**, **OVHcloud**
 - **MinIO** or any self-hosted S3-compatible service
 
@@ -41,6 +42,41 @@ sqlitedeploy up \
   --endpoint https://s3.us-east-1.amazonaws.com \
   --access-key $AWS_ACCESS_KEY_ID \
   --secret-key $AWS_SECRET_ACCESS_KEY
+```
+
+## Azure Blob Storage
+
+<Aside type="caution">
+  Azure's S3-compatible endpoint (`*.s3.blob.storage.azure.net`) requires
+  **hierarchical namespace (ADLS Gen2)** to be enabled on the storage account.
+  Enable it under **Advanced → Hierarchical namespace** when creating the account,
+  or use the Azure CLI: `az storage account hns-migration start ...`.
+  This feature is in preview — check [Azure docs](https://learn.microsoft.com/azure/storage/blobs/storage-feature-support-in-storage-accounts)
+  for regional availability.
+</Aside>
+
+```bash
+sqlitedeploy up \
+  --byo-storage \
+  --provider azure \
+  --account-id $AZURE_STORAGE_ACCOUNT \
+  --bucket $AZURE_CONTAINER \
+  --secret-key $AZURE_STORAGE_KEY
+```
+
+`--account-id` is your Azure **storage account name**. `--bucket` is the
+**container** name (must already exist). `--secret-key` is a storage account
+key — find it under **Security + networking → Access keys** in the Azure portal.
+
+To override the derived endpoint (e.g. for Azure Government or a custom domain):
+
+```bash
+sqlitedeploy up \
+  --byo-storage --provider azure \
+  --account-id $AZURE_STORAGE_ACCOUNT \
+  --bucket $AZURE_CONTAINER \
+  --secret-key $AZURE_STORAGE_KEY \
+  --endpoint https://$AZURE_STORAGE_ACCOUNT.s3.blob.storage.azure.net
 ```
 
 ## MinIO / Tigris / Wasabi / DigitalOcean Spaces / generic S3
